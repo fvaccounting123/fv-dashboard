@@ -96,8 +96,10 @@ if uploaded_files:
                 internal_mask = month_clockify['Client'].str.strip().str.lower() == 'internal'
                 client_df = month_clockify[~internal_mask]
                 
+                # 1. Compute basic clockify summaries if entries exist
+                clockify_summary = pd.DataFrame(columns=['Client', 'Hours_Spent', 'Labor_Cost', 'match_key'])
                 if not client_df.empty:
-                    clockify_summary = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
+                    c_sum = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
                     
                     rates_map = {}
                     matching_rate_cols = [rates_date_map.get(m) for m in active_months if rates_date_map.get(m)]
@@ -113,88 +115,80 @@ if uploaded_files:
                                 except: pass
                             rates_map[u_name] = sum(vals) / len(vals) if vals else 15.0
                     
-                    clockify_summary['Cost Rate'] = clockify_summary['User'].str.strip().map(rates_map).fillna(15.0)
-                    clockify_summary['Total Cost'] = clockify_summary['Duration (decimal)'].astype(float) * clockify_summary['Cost Rate']
+                    c_sum['Cost Rate'] = c_sum['User'].str.strip().map(rates_map).fillna(15.0)
+                    c_sum['Total Cost'] = c_sum['Duration (decimal)'].astype(float) * c_sum['Cost Rate']
                     
-                    client_rollup = clockify_summary.groupby('Client').agg(Hours_Spent=('Duration (decimal)', 'sum'), Labor_Cost=('Total Cost', 'sum')).reset_index()
+                    clockify_summary = c_sum.groupby('Client').agg(Hours_Spent=('Duration (decimal)', 'sum'), Labor_Cost=('Total Cost', 'sum')).reset_index()
+                    clockify_summary['match_key'] = clockify_summary['Client'].str.strip().str.lower()
+                
+                # 2. Extract and smooth all Google Sheet revenue numbers
+                smoothed_revenue_map = {}
+                raw_display_names = {}
+                
+                for idx, row in revenue_sheet.iterrows():
+                    raw_name = str(row[client_col_name]).strip()
+                    if pd.isna(row[client_col_name]) or raw_name == "" or "total" in raw_name.lower():
+                        continue
                     
-                    smoothed_revenue_map = {}
-                    raw_display_names = {}
+                    c_name = raw_name.lower()
+                    raw_display_names[c_name] = raw_name
+                    frequency = str(row[freq_col_name]).strip().lower() if freq_col_name in revenue_sheet.columns else 'monthly'
                     
-                    for idx, row in revenue_sheet.iterrows():
-                        raw_name = str(row[client_col_name]).strip()
-                        if pd.isna(row[client_col_name]) or raw_name == "" or "total" in raw_name.lower():
-                            continue
-                        
-                        c_name = raw_name.lower()
-                        raw_display_names[c_name] = raw_name
-                        frequency = str(row[freq_col_name]).strip().lower() if freq_col_name in revenue_sheet.columns else 'monthly'
-                        
-                        total_range_revenue = 0.0
-                        for m_str in active_months:
-                            actual_rev_col = rev_date_map.get(m_str)
-                            if actual_rev_col:
-                                try:
-                                    val = str(row[actual_rev_col]).replace('$', '').replace(',', '').strip()
-                                    month_val = float(val)
-                                    
-                                    if 'quarter' in frequency:
-                                        total_range_revenue += (month_val / 3.0)
-                                    else:
-                                        total_range_revenue += month_val
-                                except: pass
-                        smoothed_revenue_map[c_name] = total_range_revenue
+                    total_range_revenue = 0.0
+                    for m_str in active_months:
+                        actual_rev_col = rev_date_map.get(m_str)
+                        if actual_rev_col:
+                            try:
+                                val = str(row[actual_rev_col]).replace('$', '').replace(',', '').strip()
+                                month_val = float(val)
+                                
+                                if 'quarter' in frequency:
+                                    total_range_revenue += (month_val / 3.0)
+                                else:
+                                    total_range_revenue += month_val
+                            except: pass
+                    smoothed_revenue_map[c_name] = total_range_revenue
+                
+                # 3. 🚨 MASTER UNION ENGINE: Merges completely so no client revenue is ever lost
+                all_unique_keys = set(smoothed_revenue_map.keys()).union(set(clockify_summary['match_key'].unique()) if not clockify_summary.empty else set())
+                
+                master_rows = []
+                for key in all_unique_keys:
+                    rev_val = smoothed_revenue_map.get(key, 0.0)
+                    hours_val = 0.0
+                    cost_val = 0.0
+                    name_val = raw_display_names.get(key, None)
                     
-                    client_rollup['match_key'] = client_rollup['Client'].str.strip().str.lower()
-                    client_rollup['Monthly_Revenue'] = client_rollup['match_key'].map(smoothed_revenue_map).fillna(0.0)
+                    if not clockify_summary.empty:
+                        matching_row = clockify_summary[clockify_summary['match_key'] == key]
+                        if not matching_row.empty:
+                            hours_val = float(matching_row['Hours_Spent'].values[0])
+                            cost_val = float(matching_row['Labor_Cost'].values[0])
+                            if not name_val:
+                                name_val = str(matching_row['Client'].values[0]).strip()
+                                
+                    if not name_val:
+                        name_val = key.title()
+                        
+                    master_rows.append({
+                        'Client': name_val,
+                        'Hours_Spent': hours_val,
+                        'Labor_Cost': cost_val,
+                        'Monthly_Revenue': rev_val,
+                        'match_key': key
+                    })
                     
-                    client_rollup['Net Profit ($)'] = client_rollup['Monthly_Revenue'] - client_rollup['Labor_Cost']
-                    client_rollup['Gross Margin (%)'] = (client_rollup['Net Profit ($)'] / client_rollup['Monthly_Revenue'] * 100).fillna(0)
-                    client_rollup['Effective Hourly Rate (EHR)'] = (client_rollup['Monthly_Revenue'] / client_rollup['Hours_Spent']).fillna(0)
+                df_master = pd.DataFrame(master_rows)
+                
+                df_master['Net Profit ($)'] = df_master['Monthly_Revenue'] - df_master['Labor_Cost']
+                df_master['Gross Margin (%)'] = (df_master['Net Profit ($)'] / df_master['Monthly_Revenue'] * 100).fillna(0)
+                df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
+                
+                if is_admin:
+                    st.markdown(f"### 👑 Financial Performance Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
+                    t_rev = df_master['Monthly_Revenue'].sum()
+                    t_cost = df_master['Labor_Cost'].sum()
+                    f_prof = t_rev - t_cost
+                    f_marg = (f_prof / t_rev * 100) if t_rev > 0 else 0
                     
-                    if is_admin:
-                        st.markdown(f"### 👑 Financial Performance Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
-                        t_rev = client_rollup['Monthly_Revenue'].sum()
-                        t_cost = client_rollup['Labor_Cost'].sum()
-                        f_prof = t_rev - t_cost
-                        f_marg = (f_prof / t_rev * 100) if t_rev > 0 else 0
-                        
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Blended Range Revenue", f"${t_rev:,.2f}")
-                        c2.metric("Labor Payroll Cost", f"${t_cost:,.2f}")
-                        c3.metric("True Gross Margin", f"{f_marg:.1f}%")
-                        c4.metric("Total Hours Logged", f"{client_rollup['Hours_Spent'].sum():,.1f} hrs")
-                        
-                        st.markdown("### 📈 Visual Firm Diagnostics")
-                        chart_col1, chart_col2 = st.columns(2)
-                        
-                        with chart_col1:
-                            chart_df = client_rollup.sort_values(by='Monthly_Revenue', ascending=False).head(12)
-                            fig_compare = px.bar(
-                                chart_df, 
-                                x='Client', 
-                                y=['Monthly_Revenue', 'Labor_Cost'],
-                                barmode='group',
-                                title='Top 12 Clients: Revenue vs Labor Cost Drag',
-                                labels={'value': 'Amount ($)', 'variable': 'Financial Metric'},
-                                color_discrete_sequence=['#2ecc71', '#e74c3c']
-                            )
-                            fig_compare.update_layout(xaxis_tickangle=-45)
-                            st.plotly_chart(fig_compare, use_container_width=True)
-                            
-                        with chart_col2:
-                            margin_df = client_rollup[client_rollup['Monthly_Revenue'] > 0].sort_values(by='Gross Margin (%)', ascending=True)
-                            fig_margin = px.bar(
-                                margin_df,
-                                x='Gross Margin (%)',
-                                y='Client',
-                                orientation='h',
-                                title='Client Return on Investment (Gross Margin %)',
-                                color='Gross Margin (%)',
-                                color_continuous_scale='RdYlGn',
-                                labels={'Gross Margin (%)': 'Profit Margin %'}
-                            )
-                            st.plotly_chart(fig_margin, use_container_width=True)
-                        
-                        # Clean display dataframe keeping data as actual numeric floats
-                        df_disp =
+                    c
