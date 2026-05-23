@@ -245,4 +245,64 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             
             emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Total_Hours', 'Utilization_%', 'Commitment', 'Avg_Hours_Per_Week', 'Weekly_Variance']].sort_values(by='Weekly_Variance', ascending=True)
             
-            st.dataframe(emp_disp, use_container_width=True, hide_index
+            st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
+                "User": st.column_config.TextColumn("Employee Name"),
+                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs"),
+                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs"),
+                "Total_Hours": st.column_config.NumberColumn("Total Hours Logged", format="%.2f hrs"),
+                "Utilization_%": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
+                "Commitment": st.column_config.TextColumn("Target Commitment"),
+                "Avg_Hours_Per_Week": st.column_config.NumberColumn("Avg Hours / Week", format="%.2f hrs/wk"),
+                "Weekly_Variance": st.column_config.NumberColumn("Weekly Variance", format="%+.2f hrs/wk")
+            })
+            
+            alert_mask = (emp_disp['Commitment'].str.lower() != 'variable') & (emp_disp['Avg_Hours_Per_Week'] < (pd.to_numeric(emp_disp['Commitment'], errors='coerce').fillna(0.0) - 3.0))
+            flagged_staff = emp_disp[alert_mask]
+            
+            if not flagged_staff.empty:
+                st.warning("Firm Capacity Alerts (Employees Under Committed Targets):")
+                for _, f_row in flagged_staff.iterrows():
+                    st.write(f"{f_row['User']} is trailing behind target commitments by {abs(f_row['Weekly_Variance']):.2f} hours/week (Target: {f_row['Commitment']} hrs/wk | Actual: {f_row['Avg_Hours_Per_Week']:.2f} hrs/wk).")
+        else:
+            st.info("No timeline logs available to generate employee summaries.")
+        
+        # --- ACCOUNT PROFITABILITY ALERTS BLOCK ---
+        st.markdown("### Account Profitability Alerts")
+        underpriced = df_master[(df_master['Gross Margin (%)'] < 40) & (df_master['Hours_Spent'] > 0)]
+        if not underpriced.empty:
+            for _, u_row in underpriced.iterrows():
+                if u_row['Monthly_Revenue'] == 0:
+                    st.error(f"Write-off Alert on {u_row['Client']}: Logged {u_row['Hours_Spent']:.2f} hrs with $0.00 Revenue.")
+                else:
+                    st.warning(f"Low Margin Alert on {u_row['Client']}: Margin is {u_row['Gross Margin (%)']:.1f}%. EHR is ${u_row['Effective Hourly Rate (EHR)']:.2f}/hr.")
+
+        # --- DATA RECONCILIATION ROOM (BOTTOM) ---
+        st.markdown("---")
+        st.markdown("### Admin Bookkeeping & Data Reconciliation Room")
+        sheet_total_revenue = sum(smoothed_revenue_map.values())
+        col_audit1, col_audit2 = st.columns(2)
+        with col_audit1:
+            st.info(f"Total Revenue expected by Google Sheet calculations: ${sheet_total_revenue:,.2f}")
+        with col_audit2:
+            if abs(sheet_total_revenue - t_rev) < 0.01:
+                st.success("Perfect Match! Every single dollar inside your Google Sheet is accounted for.")
+            else:
+                st.warning(f"Discrepancy Amount: ${sheet_total_revenue - t_rev:,.2f} is unmatched.")
+        
+        clockify_tracked_keys = set(client_df['Client'].str.strip().str.lower().unique()) if not client_df.empty else set()
+        untracked_revenue_clients = []
+        for key, revenue in smoothed_revenue_map.items():
+            if key not in clockify_tracked_keys and revenue > 0:
+                untracked_revenue_clients.append({"Google Sheet Name": raw_display_names.get(key, key), "Revenue Captured": f"${revenue:,.2f}", "Status": "Captured! Displayed on Leaderboard with 0 hrs logged."})
+        if untracked_revenue_clients:
+            st.write("#### Captured Revenue with 0 Hours Logged (e.g., Okeya Stationery)")
+            st.dataframe(pd.DataFrame(untracked_revenue_clients), use_container_width=True, hide_index=True)
+            
+    else:
+        # --- STAFF ONLY VIEW (SAFE LOGGED-OUT STATUS) ---
+        st.info("Employee view active. Enter Admin Password in sidebar to reveal financials.")
+        if not client_df.empty:
+            staff_view_df = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
+            st.dataframe(staff_view_df.rename(columns={'Duration (decimal)': 'Hours Tracked'}), use_container_width=True, hide_index=True)
+        else:
+            st.warning("No time entries found.")
