@@ -105,3 +105,43 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
         c_sum = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
         rates_map = {}
         matching_rate_cols = [rates_date_map.get(m) for m in active_months if rates_date_map.get(m)]
+        
+        if matching_rate_cols:
+            for idx, row in rates_sheet.iterrows():
+                raw_user = str(row['User']).strip().lower()
+                u_name = raw_user.split('@')[0].split('.')[0]
+                
+                vals = []
+                for c in matching_rate_cols:
+                    if c in row:
+                        vals.append(safe_float(row[c]))
+                
+                rates_map[u_name] = sum(vals) / len(vals) if vals else 15.0
+        
+        c_sum['Clean_User_Key'] = c_sum['User'].str.strip().str.lower().apply(lambda x: x.split('@')[0].split('.')[0])
+        c_sum['Cost Rate'] = c_sum['Clean_User_Key'].map(rates_map).fillna(15.0)
+        c_sum['Total Cost'] = c_sum['Duration (decimal)'].astype(float) * c_sum['Cost Rate']
+        clockify_summary = c_sum.groupby('Client').agg(Hours_Spent=('Duration (decimal)', 'sum'), Labor_Cost=('Total Cost', 'sum')).reset_index()
+        clockify_summary['match_key'] = clockify_summary['Client'].str.strip().str.lower()
+    
+    smoothed_revenue_map = {}
+    raw_display_names = {}
+    for idx, row in revenue_sheet.iterrows():
+        raw_name = str(row[client_col_name]).strip()
+        if pd.isna(row[client_col_name]) or raw_name == "" or "total" in raw_name.lower():
+            continue
+        c_name = raw_name.lower()
+        raw_display_names[c_name] = raw_name
+        
+        total_range_revenue = 0.0
+        for m_str in active_months:
+            actual_rev_col = rev_date_map.get(m_str)
+            if actual_rev_col and actual_rev_col in row:
+                total_range_revenue += safe_float(row[actual_rev_col])
+        smoothed_revenue_map[c_name] = total_range_revenue
+    
+    all_unique_keys = set(smoothed_revenue_map.keys()).union(set(clockify_summary['match_key'].unique()) if not clockify_summary.empty else set())
+    master_rows = []
+    for key in all_unique_keys:
+        rev_val = smoothed_revenue_map.get(key, 0.0)
+        hours_val,
