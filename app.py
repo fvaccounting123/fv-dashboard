@@ -12,7 +12,6 @@ st.set_page_config(page_title="FVA | Dashboard", layout="wide")
 if os.path.exists("logo.png"):
     st.sidebar.image("logo.png", use_container_width=True)
 
-# Clean New Header Branded Name
 st.title("First Valley Accounting | Dashboard")
 
 # --- SIDEBAR ACCESS CONTROL ---
@@ -82,6 +81,7 @@ try:
                 curr = curr.replace(month=curr.month + 1)
                 
         client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
+        commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower()), None)
         
         def safe_float(value):
             try:
@@ -209,19 +209,49 @@ try:
                 total_weeks = max(0.1, delta_days / 7.0)
                 emp_summary['Avg_Hours_Per_Week'] = emp_summary['Total_Hours'] / total_weeks
                 
-                emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Total_Hours', 'Utilization_%', 'Avg_Hours_Per_Week']].sort_values(by='Avg_Hours_Per_Week', ascending=True)
+                # Dynamic Commitment Mapping Engine
+                commit_map = {}
+                if commit_col_name:
+                    commit_map = dict(zip(rates_sheet['User'].str.strip(), rates_sheet[commit_col_name].astype(str).str.strip()))
+                
+                emp_summary['Commitment'] = emp_summary['User'].str.strip().map(commit_map).fillna('Variable')
+                
+                def calculate_variance(row):
+                    try:
+                        return row['Avg_Hours_Per_Week'] - float(row['Commitment'])
+                    except:
+                        return 0.0
+                        
+                emp_summary['Weekly_Variance'] = emp_summary.apply(calculate_variance, axis=1)
+                
+                # Sorted from worst variance (falling behind goals) to best variance
+                emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Total_Hours', 'Utilization_%', 'Commitment', 'Avg_Hours_Per_Week', 'Weekly_Variance']].sort_values(by='Weekly_Variance', ascending=True)
+                
                 st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
                     "User": st.column_config.TextColumn("Employee Name"),
                     "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs"),
                     "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs"),
                     "Total_Hours": st.column_config.NumberColumn("Total Hours Logged", format="%.2f hrs"),
                     "Utilization_%": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
-                    "Avg_Hours_Per_Week": st.column_config.NumberColumn("Avg Hours / Week", format="%.2f hrs/wk")
+                    "Commitment": st.column_config.TextColumn("Target Commitment"),
+                    "Avg_Hours_Per_Week": st.column_config.NumberColumn("Avg Hours / Week", format="%.2f hrs/wk"),
+                    "Weekly_Variance": st.column_config.NumberColumn("Weekly Variance", format="%+.2f hrs/wk")
                 })
                 
-                low_w = emp_disp[emp_disp['Avg_Hours_Per_Week'] < 30.0]
-                if not low_w.empty:
-                    st.warning(f"⚠️ **Firm Capacity Alert:** There are {len(low_w)} employee(s) currently working under a baseline threshold of 30 hours/week. Review the top rows of the table above.")
+                # Smart capacity alert logic
+                capacity_alerts = []
+                for idx, row in emp_disp.iterrows():
+                    try:
+                        target = float(row['Commitment'])
+                        if row['Avg_Hours_Per_Week'] < (target - 3.0):
+                            capacity_alerts.append(f"**{row['User']}** is trailing behind target commitments by **{abs(row['Weekly_Variance']):.2f} hours/week** (Target: {target} hrs/wk | Actual: {row['Avg_Hours_Per_Week']:.2f} hrs/wk).")
+                    except:
+                        pass
+                        
+                if capacity_alerts:
+                    st.warning("⚠️ **Firm Capacity Alerts (Employees Under Committed Targets):**")
+                    for alert in capacity_alerts:
+                        st.write(alert)
             else:
                 st.info("No timeline logs available to generate employee summaries.")
             
