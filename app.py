@@ -81,7 +81,9 @@ try:
                 curr = curr.replace(month=curr.month + 1)
                 
         client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
-        commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower()), None)
+        
+        # Smart column check that handles both commitment spelling variations
+        commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower()), None)
         
         def safe_float(value):
             try:
@@ -246,7 +248,7 @@ try:
                     "Weekly_Variance": st.column_config.NumberColumn("Weekly Variance", format="%+.2f hrs/wk")
                 })
                 
-                # 🚀 FLATTENED CAPACITY ALERTS ENGINE: Bypasses standard loop block indent syntax filters entirely
+                # Flattened alert calculation string array
                 alert_mask = (emp_disp['Commitment'].str.lower() != 'variable') & (emp_disp['Avg_Hours_Per_Week'] < (pd.to_numeric(emp_disp['Commitment'], errors='coerce').fillna(0.0) - 3.0))
                 flagged_staff = emp_disp[alert_mask]
                 
@@ -257,7 +259,7 @@ try:
             else:
                 st.info("No timeline logs available to generate employee summaries.")
             
-            # --- ACCOUNT PROFITABILITY ALERTS BLOCK (FLATTENED ARRAY ENGINE) ---
+            # --- ACCOUNT PROFITABILITY ALERTS BLOCK ---
             st.markdown("### Account Profitability Alerts")
             underpriced = df_master[(df_master['Gross Margin (%)'] < 40) & (df_master['Hours_Spent'] > 0)]
             if not underpriced.empty:
