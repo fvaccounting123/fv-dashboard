@@ -58,7 +58,7 @@ if uploaded_files:
             client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
             freq_col_name = next((c for c in revenue_sheet.columns if 'freq' in c.lower()), 'Frequency')
             
-            # Standardize sheet column headers to dates (FIXED TYPO HERE)
+            # Standardize sheet column headers to dates
             rev_date_map = {}
             for col in revenue_sheet.columns:
                 parsed = pd.to_datetime(col, errors='coerce')
@@ -79,10 +79,19 @@ if uploaded_files:
                 clockify_summary = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
                 
                 actual_rates_col = rates_date_map.get(focus_col)
-                rates_map = dict(zip(rates_sheet['User'].str.strip(), rates_sheet[actual_rates_col])) if actual_rates_col else {}
                 
-                clockify_summary['Cost Rate'] = clockify_summary['User'].str.strip().map(rates_map).fillna(15.0)
-                clockify_summary['Total Cost'] = clockify_summary['Duration (decimal)'] * clockify_summary['Cost Rate']
+                # 🚨 FIXED HERE: Clean and safely extract employee rates data as floating numbers
+                rates_map = {}
+                if actual_rates_col:
+                    raw_rates = rates_sheet[actual_rates_col].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip()
+                    numeric_rates = pd.to_numeric(raw_rates, errors='coerce')
+                    rates_map = dict(zip(rates_sheet['User'].str.strip(), numeric_rates))
+                
+                clockify_summary['Cost Rate'] = clockify_summary['User'].str.strip().map(rates_map)
+                clockify_summary['Cost Rate'] = pd.to_numeric(clockify_summary['Cost Rate'], errors='coerce').fillna(15.0)
+                
+                # Safe numeric multiplication guaranteed
+                clockify_summary['Total Cost'] = clockify_summary['Duration (decimal)'].astype(float) * clockify_summary['Cost Rate']
                 
                 client_rollup = clockify_summary.groupby('Client').agg(Hours_Spent=('Duration (decimal)', 'sum'), Labor_Cost=('Total Cost', 'sum')).reset_index()
                 
