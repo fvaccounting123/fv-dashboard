@@ -58,18 +58,18 @@ if uploaded_files:
             client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
             freq_col_name = next((c for c in revenue_sheet.columns if 'freq' in c.lower()), 'Frequency')
             
-            # Map column date formatting automatically
+            # Standardize sheet column headers to dates (FIXED TYPO HERE)
             rev_date_map = {}
             for col in revenue_sheet.columns:
                 parsed = pd.to_datetime(col, errors='coerce')
                 if pd.notnull(parsed):
-                    rev_date_map[parsed.strftime('%Y-%m-%01')] = col
+                    rev_date_map[parsed.strftime('%Y-%m-01')] = col
 
             rates_date_map = {}
             for col in rates_sheet.columns:
                 parsed = pd.to_datetime(col, errors='coerce')
                 if pd.notnull(parsed):
-                    rates_date_map[parsed.strftime('%Y-%m-%01')] = col
+                    rates_date_map[parsed.strftime('%Y-%m-01')] = col
             
             month_clockify = master_clockify[master_clockify['Report Column'] == focus_col]
             internal_mask = month_clockify['Client'].str.strip().str.lower() == 'internal'
