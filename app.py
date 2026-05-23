@@ -32,7 +32,6 @@ CLOCKIFY_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=o
 
 context = ssl._create_unverified_context()
 
-# LINEAR ISOLATED DATA CAPTURE (Safe from display block indentation shifts)
 try:
     master_clockify = pd.read_csv(urllib.request.urlopen(CLOCKIFY_URL, context=context))
     revenue_sheet = pd.read_csv(urllib.request.urlopen(REVENUE_URL, context=context))
@@ -41,7 +40,6 @@ except Exception as e:
     st.error(f"Google Sheet Data Load Error: {e}")
     st.stop()
 
-# Standardize Columns immediately upon loading
 revenue_sheet.columns = revenue_sheet.columns.str.strip()
 rates_sheet.columns = rates_sheet.columns.str.strip()
 master_clockify.columns = master_clockify.columns.str.strip()
@@ -166,7 +164,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
     df_master['Gross Margin (%)'] = (df_master['Net Profit ($)'] / df_master['Monthly_Revenue'] * 100).fillna(0)
     df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
     
-    # 🔐 STABLE SECURITY ROUTER BLOCK
+    # 🔐 ROLE SECURITY GATEWAY
     if is_admin:
         st.markdown(f"### Financial Performance Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
         t_rev = df_master['Monthly_Revenue'].sum()
@@ -207,17 +205,25 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
         
         if not month_clockify.empty:
             m_clock_cp = month_clockify.copy()
-            m_clock_cp['Is_Internal'] = m_clock_cp['Client'].str.strip().str.lower() == 'internal'
+            m_clock_cp['Is_Internal_Type'] = m_clock_cp['Client'].str.strip().str.lower().apply(lambda x: 'Internal Overhead' if x == 'internal' else 'Client Hours')
             
-            emp_summary = m_clock_cp.groupby(['User', 'Is_Internal'])['Duration (decimal)'].unstack(fill_value=0).reset_index()
-            emp_summary.columns = [str(c) for c in emp_summary.columns]
+            # CRITICAL ATTR FIX: Uses Pivot Table with safe fill defaults to handle non-internal users safely
+            emp_summary = pd.pivot_table(
+                m_clock_cp, 
+                values='Duration (decimal)', 
+                index='User', 
+                columns='Is_Internal_Type', 
+                aggfunc='sum', 
+                fill_value=0.0
+            ).reset_index()
             
-            c_h_col = 'False' if 'False' in emp_summary.columns else None
-            i_h_col = 'True' if 'True' in emp_summary.columns else None
-            
-            emp_summary['Client_Hours'] = emp_summary[c_h_col].astype(float) if c_h_col else 0.0
-            emp_summary['Internal_Hours'] = emp_summary[i_h_col].astype(float) if i_h_col else 0.0
-            
+            # Guarantee both columns exist even if no user logged overhead hours
+            if 'Client Hours' not in emp_summary.columns:
+                emp_summary['Client Hours'] = 0.0
+            if 'Internal Overhead' not in emp_summary.columns:
+                emp_summary['Internal Overhead'] = 0.0
+                
+            emp_summary = emp_summary.rename(columns={'Client Hours': 'Client_Hours', 'Internal Overhead': 'Internal_Hours'})
             emp_summary['Total_Hours'] = emp_summary['Client_Hours'] + emp_summary['Internal_Hours']
             emp_summary['Utilization_%'] = (emp_summary['Client_Hours'] / emp_summary['Total_Hours'] * 100).fillna(0)
             
@@ -238,7 +244,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             emp_summary['Commitment'] = emp_summary['Clean_Clockify_Key'].map(commit_map).fillna('Variable')
             emp_summary['Commitment'] = emp_summary['Commitment'].apply(lambda x: 'Variable' if x.lower() in ['variable', 'nan', ''] else x)
             
-            # NATIVE VECTORIZED VARIANCE CALCULATIONS
+            # VECTORIZED VARIANCE TRACKER
             emp_summary['Commitment_Numeric'] = pd.to_numeric(emp_summary['Commitment'], errors='coerce').fillna(0.0)
             emp_summary['Weekly_Variance'] = emp_summary['Avg_Hours_Per_Week'] - emp_summary['Commitment_Numeric']
             emp_summary.loc[emp_summary['Commitment'].str.lower() == 'variable', 'Weekly_Variance'] = 0.0
