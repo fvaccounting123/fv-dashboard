@@ -81,8 +81,6 @@ try:
                 curr = curr.replace(month=curr.month + 1)
                 
         client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
-        
-        # Smart column check that handles both commitment spelling variations
         commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower()), None)
         
         def safe_float(value):
@@ -219,15 +217,19 @@ try:
                 total_weeks = max(0.1, delta_days / 7.0)
                 emp_summary['Avg_Hours_Per_Week'] = emp_summary['Total_Hours'] / total_weeks
                 
-                # Dynamic Commitment Mapping Engine
+                # Dynamic Commitment Mapping Engine (Forced-String Normalizer)
                 commit_map = {}
                 if commit_col_name:
                     for idx, row in rates_sheet.iterrows():
                         u_name_clean = str(row['User']).strip().lower()
-                        commit_val_clean = str(row[commit_col_name]).strip()
-                        commit_map[u_name_clean] = commit_val_clean
+                        # Forces cell contents to string and cleans whitespace to link mixed data types
+                        raw_cell_str = str(row[commit_col_name]).strip().replace('.0', '')
+                        commit_map[u_name_clean] = raw_cell_str
                 
-                emp_summary['Commitment'] = emp_summary['User'].str.strip().str.lower().map(commit_map).fillna('Variable')
+                emp_summary['Commitment_Raw'] = emp_summary['User'].str.strip().str.lower().map(commit_map).fillna('Variable')
+                
+                # Clean up string text variants to guarantee uniform processing
+                emp_summary['Commitment'] = emp_summary['Commitment_Raw'].apply(lambda x: 'Variable' if x.lower() in ['variable', 'nan', ''] else x)
                 
                 # NATIVE VECTORIZED VARIANCE CALCULATIONS
                 emp_summary['Commitment_Numeric'] = pd.to_numeric(emp_summary['Commitment'], errors='coerce').fillna(0.0)
@@ -248,7 +250,7 @@ try:
                     "Weekly_Variance": st.column_config.NumberColumn("Weekly Variance", format="%+.2f hrs/wk")
                 })
                 
-                # Flattened alert calculation string array
+                # Flattened alert calculation engine
                 alert_mask = (emp_disp['Commitment'].str.lower() != 'variable') & (emp_disp['Avg_Hours_Per_Week'] < (pd.to_numeric(emp_disp['Commitment'], errors='coerce').fillna(0.0) - 3.0))
                 flagged_staff = emp_disp[alert_mask]
                 
