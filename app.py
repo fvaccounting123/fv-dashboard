@@ -8,21 +8,21 @@ import os
 
 st.set_page_config(page_title="FVA | Dashboard", layout="wide")
 
-# --- 🏢 AUTOMATED COMPANY LOGO ENGINE ---
+# --- COMPANY LOGO ENGINE ---
 if os.path.exists("logo.png"):
     st.sidebar.image("logo.png", use_container_width=True)
 
 st.title("First Valley Accounting | Dashboard")
 
 # --- SIDEBAR ACCESS CONTROL ---
-st.sidebar.header("🔑 Access Control")
+st.sidebar.header("Access Control")
 admin_password = st.sidebar.text_input("Enter Admin Password", type="password")
 is_admin = (admin_password.strip().upper() == "FV2026")
 
 if is_admin:
-    st.sidebar.success("🔓 Admin Access Granted")
+    st.sidebar.success("Admin Access Granted")
 elif admin_password:
-    st.sidebar.error("❌ Incorrect Password")
+    st.sidebar.error("Incorrect Password")
 
 # --- CONNECT TO MASTER GOOGLE SHEET ---
 SHEET_ID = "1maGLtLBdDj7_uxFoeMMuvqEU5pLfdwH6mGrhx9V4B-c"
@@ -158,7 +158,7 @@ try:
         df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
         
         if is_admin:
-            st.markdown(f"### 👑 Financial Performance Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
+            st.markdown(f"### Financial Performance Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
             t_rev = df_master['Monthly_Revenue'].sum()
             t_cost = df_master['Labor_Cost'].sum()
             f_prof = t_rev - t_cost
@@ -170,7 +170,7 @@ try:
             c3.metric("True Gross Margin", f"{f_marg:.1f}%")
             c4.metric("Total Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
             
-            st.markdown("### 📈 Visual Firm Diagnostics")
+            st.markdown("### Visual Firm Diagnostics")
             chart_df = df_master.sort_values(by='Monthly_Revenue', ascending=False).head(15)
             fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Labor Cost Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#2ecc71', '#e74c3c'])
             fig_compare.update_layout(xaxis_tickangle=-45)
@@ -182,7 +182,6 @@ try:
             
             df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
             
-            # 🚨 EXPLICITLY CLOSED TABLE BLOCK: Perfectly bounded to guarantee zero syntax drops
             st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
                 "Client": st.column_config.TextColumn("Client"),
                 "Hours_Spent": st.column_config.NumberColumn("Hours Spent", format="%.2f hrs"),
@@ -193,9 +192,9 @@ try:
                 "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Effective Hourly Rate (EHR)", format="$%.2f/hr")
             })
             
-            # --- 👥 EMPLOYEE CAPACITY & UTILIZATION TRACKER WORKSPACE ---
+            # --- EMPLOYEE CAPACITY & UTILIZATION TRACKER WORKSPACE ---
             st.markdown("---")
-            st.markdown("### 👥 Employee Capacity & Utilization Tracker")
+            st.markdown("### Employee Capacity & Utilization Tracker")
             
             if not month_clockify.empty:
                 m_clock_cp = month_clockify.copy()
@@ -205,4 +204,49 @@ try:
                 emp_summary.columns = [str(c) for c in emp_summary.columns]
                 
                 c_h_col = 'False' if 'False' in emp_summary.columns else None
-                i_h_col = 'True' if 'True' in emp_summary.columns else
+                i_h_col = 'True' if 'True' in emp_summary.columns else None
+                
+                emp_summary['Client_Hours'] = emp_summary[c_h_col].astype(float) if c_h_col else 0.0
+                emp_summary['Internal_Hours'] = emp_summary[i_h_col].astype(float) if i_h_col else None
+                emp_summary['Internal_Hours'] = emp_summary['Internal_Hours'].fillna(0.0)
+                
+                emp_summary['Total_Hours'] = emp_summary['Client_Hours'] + emp_summary['Internal_Hours']
+                emp_summary['Utilization_%'] = (emp_summary['Client_Hours'] / emp_summary['Total_Hours'] * 100).fillna(0)
+                
+                delta_days = (focus_end - focus_start).days + 1
+                total_weeks = max(0.1, delta_days / 7.0)
+                emp_summary['Avg_Hours_Per_Week'] = emp_summary['Total_Hours'] / total_weeks
+                
+                # Dynamic Commitment Mapping Engine (Case & Space Insensitive)
+                commit_map = {}
+                if commit_col_name:
+                    for idx, row in rates_sheet.iterrows():
+                        u_name_clean = str(row['User']).strip().lower()
+                        commit_val_clean = str(row[commit_col_name]).strip()
+                        commit_map[u_name_clean] = commit_val_clean
+                
+                emp_summary['Commitment'] = emp_summary['User'].str.strip().str.lower().map(commit_map).fillna('Variable')
+                
+                # NATIVE VECTORIZED VARIANCE CALCULATIONS
+                emp_summary['Commitment_Numeric'] = pd.to_numeric(emp_summary['Commitment'], errors='coerce').fillna(0.0)
+                emp_summary['Weekly_Variance'] = emp_summary['Avg_Hours_Per_Week'] - emp_summary['Commitment_Numeric']
+                emp_summary.loc[emp_summary['Commitment'].str.lower() == 'variable', 'Weekly_Variance'] = 0.0
+                
+                # Sorted from worst variance to best variance
+                emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Total_Hours', 'Utilization_%', 'Commitment', 'Avg_Hours_Per_Week', 'Weekly_Variance']].sort_values(by='Weekly_Variance', ascending=True)
+                
+                st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
+                    "User": st.column_config.TextColumn("Employee Name"),
+                    "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs"),
+                    "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs"),
+                    "Total_Hours": st.column_config.NumberColumn("Total Hours Logged", format="%.2f hrs"),
+                    "Utilization_%": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
+                    "Commitment": st.column_config.TextColumn("Target Commitment"),
+                    "Avg_Hours_Per_Week": st.column_config.NumberColumn("Avg Hours / Week", format="%.2f hrs/wk"),
+                    "Weekly_Variance": st.column_config.NumberColumn("Weekly Variance", format="%+.2f hrs/wk")
+                })
+                
+                # Smart capacity alert logic
+                capacity_alerts = []
+                for idx, row in emp_disp.iterrows():
+                    if row['Commitment'].lower() != 'variable':
