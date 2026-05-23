@@ -181,10 +181,28 @@ try:
             st.plotly_chart(fig_margin, use_container_width=True)
             
             df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
+            
+            # 🚨 EXPLICITLY CLOSED TABLE BLOCK: Perfectly bounded to guarantee zero syntax drops
             st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
                 "Client": st.column_config.TextColumn("Client"),
                 "Hours_Spent": st.column_config.NumberColumn("Hours Spent", format="%.2f hrs"),
                 "Labor_Cost": st.column_config.NumberColumn("Labor Cost", format="$%.2f"),
                 "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f"),
                 "Net Profit ($)": st.column_config.NumberColumn("Net Profit ($)", format="$%.2f"),
-                "Gross Margin (%)": st.column_config.Number
+                "Gross Margin (%)": st.column_config.NumberColumn("Gross Margin (%)", format="%.1f%%"),
+                "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Effective Hourly Rate (EHR)", format="$%.2f/hr")
+            })
+            
+            # --- 👥 EMPLOYEE CAPACITY & UTILIZATION TRACKER WORKSPACE ---
+            st.markdown("---")
+            st.markdown("### 👥 Employee Capacity & Utilization Tracker")
+            
+            if not month_clockify.empty:
+                m_clock_cp = month_clockify.copy()
+                m_clock_cp['Is_Internal'] = m_clock_cp['Client'].str.strip().str.lower() == 'internal'
+                
+                emp_summary = m_clock_cp.groupby(['User', 'Is_Internal'])['Duration (decimal)'].sum().unstack(fill_value=0).reset_index()
+                emp_summary.columns = [str(c) for c in emp_summary.columns]
+                
+                c_h_col = 'False' if 'False' in emp_summary.columns else None
+                i_h_col = 'True' if 'True' in emp_summary.columns else
