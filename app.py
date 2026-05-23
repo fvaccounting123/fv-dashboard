@@ -217,7 +217,7 @@ try:
                 total_weeks = max(0.1, delta_days / 7.0)
                 emp_summary['Avg_Hours_Per_Week'] = emp_summary['Total_Hours'] / total_weeks
                 
-                # Dynamic Commitment Mapping Engine (Case & Space Insensitive)
+                # Dynamic Commitment Mapping Engine
                 commit_map = {}
                 if commit_col_name:
                     for idx, row in rates_sheet.iterrows():
@@ -246,7 +246,55 @@ try:
                     "Weekly_Variance": st.column_config.NumberColumn("Weekly Variance", format="%+.2f hrs/wk")
                 })
                 
-                # Smart capacity alert logic
-                capacity_alerts = []
-                for idx, row in emp_disp.iterrows():
-                    if row['Commitment'].lower() != 'variable':
+                # 🚀 FLATTENED CAPACITY ALERTS ENGINE: Bypasses standard loop block indent syntax filters entirely
+                alert_mask = (emp_disp['Commitment'].str.lower() != 'variable') & (emp_disp['Avg_Hours_Per_Week'] < (pd.to_numeric(emp_disp['Commitment'], errors='coerce').fillna(0.0) - 3.0))
+                flagged_staff = emp_disp[alert_mask]
+                
+                if not flagged_staff.empty:
+                    st.warning("Firm Capacity Alerts (Employees Under Committed Targets):")
+                    for _, f_row in flagged_staff.iterrows():
+                        st.write(f"{f_row['User']} is trailing behind target commitments by {abs(f_row['Weekly_Variance']):.2f} hours/week (Target: {f_row['Commitment']} hrs/wk | Actual: {f_row['Avg_Hours_Per_Week']:.2f} hrs/wk).")
+            else:
+                st.info("No timeline logs available to generate employee summaries.")
+            
+            # --- ACCOUNT PROFITABILITY ALERTS BLOCK (FLATTENED ARRAY ENGINE) ---
+            st.markdown("### Account Profitability Alerts")
+            underpriced = df_master[(df_master['Gross Margin (%)'] < 40) & (df_master['Hours_Spent'] > 0)]
+            if not underpriced.empty:
+                for _, u_row in underpriced.iterrows():
+                    if u_row['Monthly_Revenue'] == 0:
+                        st.error(f"Write-off Alert on {u_row['Client']}: Logged {u_row['Hours_Spent']:.2f} hrs with $0.00 Revenue.")
+                    else:
+                        st.warning(f"Low Margin Alert on {u_row['Client']}: Margin is {u_row['Gross Margin (%)']:.1f}%. EHR is ${u_row['Effective Hourly Rate (EHR)']:.2f}/hr.")
+
+            # --- DATA RECONCILIATION ROOM (BOTTOM) ---
+            st.markdown("---")
+            st.markdown("### Admin Bookkeeping & Data Reconciliation Room")
+            sheet_total_revenue = sum(smoothed_revenue_map.values())
+            col_audit1, col_audit2 = st.columns(2)
+            with col_audit1:
+                st.info(f"Total Revenue expected by Google Sheet calculations: ${sheet_total_revenue:,.2f}")
+            with col_audit2:
+                if abs(sheet_total_revenue - t_rev) < 0.01:
+                    st.success("Perfect Match! Every single dollar inside your Google Sheet is accounted for.")
+                else:
+                    st.warning(f"Discrepancy Amount: ${sheet_total_revenue - t_rev:,.2f} is unmatched.")
+            
+            clockify_tracked_keys = set(client_df['Client'].str.strip().str.lower().unique()) if not client_df.empty else set()
+            untracked_revenue_clients = []
+            for key, revenue in smoothed_revenue_map.items():
+                if key not in clockify_tracked_keys and revenue > 0:
+                    untracked_revenue_clients.append({"Google Sheet Name": raw_display_names.get(key, key), "Revenue Captured": f"${revenue:,.2f}", "Status": "Captured! Displayed on Leaderboard with 0 hrs logged."})
+            if untracked_revenue_clients:
+                st.write("#### Captured Revenue with 0 Hours Logged (e.g., Okeya Stationery)")
+                st.dataframe(pd.DataFrame(untracked_revenue_clients), use_container_width=True, hide_index=True)
+                
+        else:
+            st.info("Employee view active. Enter Admin Password in sidebar to reveal financials.")
+            if not client_df.empty:
+                staff = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
+                st.dataframe(staff.rename(columns={'Duration (decimal)': 'Hours Tracked'}), use_container_width=True, hide_index=True)
+            else:
+                st.warning("No time entries found.")
+except Exception as e:
+    st.error(f"Google Sheet Connection Error: {e}. Ensure you have created the 'Clockify_Data' tab in your sheet.")
