@@ -104,7 +104,8 @@ try:
             
             if matching_rate_cols:
                 for idx, row in rates_sheet.iterrows():
-                    u_name = str(row['User']).strip().lower()
+                    raw_user = str(row['User']).strip().lower()
+                    u_name = raw_user.split('@')[0].split('.')[0]
                     
                     vals = []
                     for c in matching_rate_cols:
@@ -113,7 +114,9 @@ try:
                     
                     rates_map[u_name] = sum(vals) / len(vals) if vals else 15.0
             
-            c_sum['Cost Rate'] = c_sum['User'].str.strip().str.lower().map(rates_map).fillna(15.0)
+            # Smart Rate Mapping Lookup
+            c_sum['Clean_User_Key'] = c_sum['User'].str.strip().str.lower().apply(lambda x: x.split('@')[0].split('.')[0])
+            c_sum['Cost Rate'] = c_sum['Clean_User_Key'].map(rates_map).fillna(15.0)
             c_sum['Total Cost'] = c_sum['Duration (decimal)'].astype(float) * c_sum['Cost Rate']
             clockify_summary = c_sum.groupby('Client').agg(Hours_Spent=('Duration (decimal)', 'sum'), Labor_Cost=('Total Cost', 'sum')).reset_index()
             clockify_summary['match_key'] = clockify_summary['Client'].str.strip().str.lower()
@@ -181,7 +184,6 @@ try:
             st.plotly_chart(fig_margin, use_container_width=True)
             
             df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
-            
             st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
                 "Client": st.column_config.TextColumn("Client"),
                 "Hours_Spent": st.column_config.NumberColumn("Hours Spent", format="%.2f hrs"),
@@ -217,19 +219,18 @@ try:
                 total_weeks = max(0.1, delta_days / 7.0)
                 emp_summary['Avg_Hours_Per_Week'] = emp_summary['Total_Hours'] / total_weeks
                 
-                # Dynamic Commitment Mapping Engine (Forced-String Normalizer)
+                # Dynamic Commitment Mapping Engine with Substring/Email Parser
                 commit_map = {}
                 if commit_col_name:
                     for idx, row in rates_sheet.iterrows():
-                        u_name_clean = str(row['User']).strip().lower()
-                        # Forces cell contents to string and cleans whitespace to link mixed data types
+                        raw_cell_user = str(row['User']).strip().lower()
+                        clean_sheet_key = raw_cell_user.split('@')[0].split('.')[0]
                         raw_cell_str = str(row[commit_col_name]).strip().replace('.0', '')
-                        commit_map[u_name_clean] = raw_cell_str
+                        commit_map[clean_sheet_key] = raw_cell_str
                 
-                emp_summary['Commitment_Raw'] = emp_summary['User'].str.strip().str.lower().map(commit_map).fillna('Variable')
-                
-                # Clean up string text variants to guarantee uniform processing
-                emp_summary['Commitment'] = emp_summary['Commitment_Raw'].apply(lambda x: 'Variable' if x.lower() in ['variable', 'nan', ''] else x)
+                emp_summary['Clean_Clockify_Key'] = emp_summary['User'].str.strip().str.lower().apply(lambda x: x.split('@')[0].split('.')[0])
+                emp_summary['Commitment'] = emp_summary['Clean_Clockify_Key'].map(commit_map).fillna('Variable')
+                emp_summary['Commitment'] = emp_summary['Commitment'].apply(lambda x: 'Variable' if x.lower() in ['variable', 'nan', ''] else x)
                 
                 # NATIVE VECTORIZED VARIANCE CALCULATIONS
                 emp_summary['Commitment_Numeric'] = pd.to_numeric(emp_summary['Commitment'], errors='coerce').fillna(0.0)
@@ -271,34 +272,4 @@ try:
                     else:
                         st.warning(f"Low Margin Alert on {u_row['Client']}: Margin is {u_row['Gross Margin (%)']:.1f}%. EHR is ${u_row['Effective Hourly Rate (EHR)']:.2f}/hr.")
 
-            # --- DATA RECONCILIATION ROOM (BOTTOM) ---
-            st.markdown("---")
-            st.markdown("### Admin Bookkeeping & Data Reconciliation Room")
-            sheet_total_revenue = sum(smoothed_revenue_map.values())
-            col_audit1, col_audit2 = st.columns(2)
-            with col_audit1:
-                st.info(f"Total Revenue expected by Google Sheet calculations: ${sheet_total_revenue:,.2f}")
-            with col_audit2:
-                if abs(sheet_total_revenue - t_rev) < 0.01:
-                    st.success("Perfect Match! Every single dollar inside your Google Sheet is accounted for.")
-                else:
-                    st.warning(f"Discrepancy Amount: ${sheet_total_revenue - t_rev:,.2f} is unmatched.")
-            
-            clockify_tracked_keys = set(client_df['Client'].str.strip().str.lower().unique()) if not client_df.empty else set()
-            untracked_revenue_clients = []
-            for key, revenue in smoothed_revenue_map.items():
-                if key not in clockify_tracked_keys and revenue > 0:
-                    untracked_revenue_clients.append({"Google Sheet Name": raw_display_names.get(key, key), "Revenue Captured": f"${revenue:,.2f}", "Status": "Captured! Displayed on Leaderboard with 0 hrs logged."})
-            if untracked_revenue_clients:
-                st.write("#### Captured Revenue with 0 Hours Logged (e.g., Okeya Stationery)")
-                st.dataframe(pd.DataFrame(untracked_revenue_clients), use_container_width=True, hide_index=True)
-                
-        else:
-            st.info("Employee view active. Enter Admin Password in sidebar to reveal financials.")
-            if not client_df.empty:
-                staff = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
-                st.dataframe(staff.rename(columns={'Duration (decimal)': 'Hours Tracked'}), use_container_width=True, hide_index=True)
-            else:
-                st.warning("No time entries found.")
-except Exception as e:
-    st.error(f"Google Sheet Connection Error: {e}. Ensure you have created the 'Clockify_Data' tab in your sheet.")
+            # --- DATA RECONC
