@@ -4,9 +4,12 @@ import datetime
 import ssl
 import urllib.request
 import plotly.express as px
+import os
 
 st.set_page_config(page_title="FV | Master Dashboard", layout="wide")
 st.title("📊 First Valley | Master Profitability Dashboard")
+
+DB_FILE = "stored_clockify.csv"
 
 # --- SAFE UTILITY FUNCTIONS ---
 def safe_float(value):
@@ -18,205 +21,250 @@ def safe_float(value):
     except:
         return 0.0
 
-# --- SIDEBAR ACCESS CONTROL ---
+# --- SIDEBAR ACCESS CONTROL & MAINTENANCE ---
 st.sidebar.header("🔑 Access Control")
 admin_password = st.sidebar.text_input("Enter Admin Password", type="password")
 is_admin = (admin_password.strip().upper() == "FV2026")
 
+uploaded_files = None
 if is_admin:
     st.sidebar.success("🔓 Admin Access Granted")
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📥 Database Maintenance")
+    uploaded_files = st.sidebar.file_uploader("Upload fresh Clockify logs to update database:", type=["csv"], accept_multiple_files=True)
+    
+    if os.path.exists(DB_FILE):
+        if st.sidebar.button("🗑️ Reset/Wipe Cloud Database"):
+            try:
+                os.remove(DB_FILE)
+                st.sidebar.success("Database wiped successfully!")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Error: {e}")
 elif admin_password:
     st.sidebar.error("❌ Incorrect Password")
 
-# --- FILE UPLOADER ---
-uploaded_files = st.file_uploader("📥 Drag and drop Clockify CSV files here", type=["csv"], accept_multiple_files=True)
+# --- SERVER STORAGE ENGINE ---
+if os.path.exists(DB_FILE):
+    try:
+        master_clockify = pd.read_csv(DB_FILE)
+        master_clockify['Parsed Date'] = pd.to_datetime(master_clockify['Start Date'], errors='coerce')
+    except Exception as e:
+        st.error(f"Error loading server storage file: {e}")
+        master_clockify = None
+else:
+    master_clockify = None
 
-if uploaded_files:
-    all_months_data = []
+# Admin upload processor (Appends records safely with automated duplicate protections)
+if uploaded_files and is_admin:
+    new_dfs = []
     for file in uploaded_files:
         try:
-            df = pd.read_csv(file)
-            df['Parsed Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
-            df['Report Column'] = df['Parsed Date'].dt.strftime('%Y-%m-01')
-            all_months_data.append(df)
+            ndf = pd.read_csv(file)
+            new_dfs.append(ndf)
         except:
-            st.error(f"Error reading {file.name}")
+            st.error(f"Error reading uploaded file: {file.name}")
             
-    if all_months_data:
-        master_clockify = pd.concat(all_months_data, ignore_index=True)
-        min_log_date = master_clockify['Parsed Date'].min().date()
-        max_log_date = master_clockify['Parsed Date'].max().date()
+    if new_dfs:
+        uploaded_combined = pd.concat(new_dfs, ignore_index=True)
+        if master_clockify is not None:
+            historical_raw = master_clockify.drop(columns=['Parsed Date'], errors='ignore')
+            combined_raw = pd.concat([historical_raw, uploaded_combined], ignore_index=True)
+        else:
+            combined_raw = uploaded_combined
+            
+        # Strip overlaps out completely
+        combined_raw = combined_raw.drop_duplicates()
+        combined_raw.to_csv(DB_FILE, index=False)
+        st.success("🎉 Cloud database updated successfully! Reloading view...")
+        st.rerun()
+
+# --- MAIN DASHBOARD FLOW ---
+if master_clockify is not None and not master_clockify.empty:
+    # Calculate previous month date windows dynamically
+    today = datetime.date.today()
+    first_this_month = today.replace(day=1)
+    last_prev_month = first_this_month - datetime.timedelta(days=1)
+    first_prev_month = last_prev_month.replace(day=1)
+    
+    min_log_date = min(master_clockify['Parsed Date'].dropna().min().date(), first_prev_month)
+    max_log_date = max(master_clockify['Parsed Date'].dropna().max().date(), last_prev_month)
+    
+    st.markdown("### 📅 Filter Dashboard Scope")
+    selected_range = st.date_input(
+        "Select custom date window to analyze:",
+        value=(first_prev_month, last_prev_month), # Defaults automatically to previous full month
+        min_value=min_log_date,
+        max_value=max_log_date
+    )
+    
+    if isinstance(selected_range, tuple) and len(selected_range) == 2:
+        focus_start, focus_end = selected_range
+        focus_start_dt = pd.to_datetime(focus_start)
+        focus_end_dt = pd.to_datetime(focus_end)
         
-        st.markdown("### 📅 Filter Dashboard Scope")
-        selected_range = st.date_input("Select custom date window to analyze:", value=(min_log_date, max_log_date), min_value=min_log_date, max_value=max_log_date)
+        month_clockify = master_clockify[
+            (master_clockify['Parsed Date'] >= focus_start_dt) & 
+            (master_clockify['Parsed Date'] <= focus_end_dt)
+        ]
         
-        if isinstance(selected_range, tuple) and len(selected_range) == 2:
-            focus_start, focus_end = selected_range
-            focus_start_dt = pd.to_datetime(focus_start)
-            focus_end_dt = pd.to_datetime(focus_end)
+        active_months = []
+        curr = focus_start_dt.replace(day=1)
+        while curr <= focus_end_dt:
+            active_months.append(curr.strftime('%Y-%m-%01'))
+            if curr.month == 12:
+                curr = curr.replace(year=curr.year + 1, month=1)
+            else:
+                curr = curr.replace(month=curr.month + 1)
+                
+        SHEET_ID = "1maGLtLBdDj7_uxFoeMMuvqEU5pLfdwH6mGrhx9V4B-c"
+        REVENUE_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=2026"
+        RATES_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Employee+Hourly+Rates"
+        
+        try:
+            context = ssl._create_unverified_context()
+            revenue_sheet = pd.read_csv(urllib.request.urlopen(REVENUE_URL, context=context))
+            rates_sheet = pd.read_csv(urllib.request.urlopen(RATES_URL, context=context))
             
-            month_clockify = master_clockify[(master_clockify['Parsed Date'] >= focus_start_dt) & (master_clockify['Parsed Date'] <= focus_end_dt)]
+            revenue_sheet.columns = revenue_sheet.columns.str.strip()
+            rates_sheet.columns = rates_sheet.columns.str.strip()
             
-            active_months = []
-            curr = focus_start_dt.replace(day=1)
-            while curr <= focus_end_dt:
-                active_months.append(curr.strftime('%Y-%m-%01'))
-                if curr.month == 12:
-                    curr = curr.replace(year=curr.year + 1, month=1)
-                else:
-                    curr = curr.replace(month=curr.month + 1)
+            client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
             
-            SHEET_ID = "1maGLtLBdDj7_uxFoeMMuvqEU5pLfdwH6mGrhx9V4B-c"
-            REVENUE_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=2026"
-            RATES_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Employee+Hourly+Rates"
+            rev_date_map = {pd.to_datetime(col, errors='coerce').strftime('%Y-%m-%01'): col for col in revenue_sheet.columns if pd.notnull(pd.to_datetime(col, errors='coerce'))}
+            rates_date_map = {pd.to_datetime(col, errors='coerce').strftime('%Y-%m-%01'): col for col in rates_sheet.columns if pd.notnull(pd.to_datetime(col, errors='coerce'))}
             
-            try:
-                context = ssl._create_unverified_context()
-                revenue_sheet = pd.read_csv(urllib.request.urlopen(REVENUE_URL, context=context))
-                rates_sheet = pd.read_csv(urllib.request.urlopen(RATES_URL, context=context))
+            internal_mask = month_clockify['Client'].str.strip().str.lower() == 'internal'
+            client_df = month_clockify[~internal_mask]
+            
+            clockify_summary = pd.DataFrame(columns=['Client', 'Hours_Spent', 'Labor_Cost', 'match_key'])
+            if not client_df.empty:
+                c_sum = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
+                rates_map = {}
+                matching_rate_cols = [rates_date_map.get(m) for m in active_months if rates_date_map.get(m)]
                 
-                revenue_sheet.columns = revenue_sheet.columns.str.strip()
-                rates_sheet.columns = rates_sheet.columns.str.strip()
+                if matching_rate_cols:
+                    for idx, row in rates_sheet.iterrows():
+                        u_name = str(row['User']).strip()
+                        vals = [safe_float(row[c]) for c in matching_rate_cols if c in row]
+                        rates_map[u_name] = sum(vals) / len(vals) if vals else 15.0
                 
-                client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
-                freq_col_name = next((c for c in revenue_sheet.columns if 'freq' in c.lower()), 'Frequency')
+                c_sum['Cost Rate'] = c_sum['User'].str.strip().map(rates_map).fillna(15.0)
+                c_sum['Total Cost'] = c_sum['Duration (decimal)'].astype(float) * c_sum['Cost Rate']
+                clockify_summary = c_sum.groupby('Client').agg(Hours_Spent=('Duration (decimal)', 'sum'), Labor_Cost=('Total Cost', 'sum')).reset_index()
+                clockify_summary['match_key'] = clockify_summary['Client'].str.strip().str.lower()
+            
+            smoothed_revenue_map = {}
+            raw_display_names = {}
+            for idx, row in revenue_sheet.iterrows():
+                raw_name = str(row[client_col_name]).strip()
+                if pd.isna(row[client_col_name]) or raw_name == "" or "total" in raw_name.lower():
+                    continue
+                c_name = raw_name.lower()
+                raw_display_names[c_name] = raw_name
                 
-                rev_date_map = {pd.to_datetime(col, errors='coerce').strftime('%Y-%m-%01'): col for col in revenue_sheet.columns if pd.notnull(pd.to_datetime(col, errors='coerce'))}
-                rates_date_map = {pd.to_datetime(col, errors='coerce').strftime('%Y-%m-%01'): col for col in rates_sheet.columns if pd.notnull(pd.to_datetime(col, errors='coerce'))}
+                total_range_revenue = 0.0
+                for m_str in active_months:
+                    actual_rev_col = rev_date_map.get(m_str)
+                    if actual_rev_col and actual_rev_col in row:
+                        total_range_revenue += safe_float(row[actual_rev_col])
+                smoothed_revenue_map[c_name] = total_range_revenue
+            
+            all_unique_keys = set(smoothed_revenue_map.keys()).union(set(clockify_summary['match_key'].unique()) if not clockify_summary.empty else set())
+            master_rows = []
+            for key in all_unique_keys:
+                rev_val = smoothed_revenue_map.get(key, 0.0)
+                hours_val, cost_val = 0.0, 0.0
+                name_val = raw_display_names.get(key, None)
                 
-                internal_mask = month_clockify['Client'].str.strip().str.lower() == 'internal'
-                client_df = month_clockify[~internal_mask]
+                if not clockify_summary.empty:
+                    matching_row = clockify_summary[clockify_summary['match_key'] == key]
+                    if not matching_row.empty:
+                        hours_val = float(matching_row['Hours_Spent'].values[0])
+                        cost_val = float(matching_row['Labor_Cost'].values[0])
+                        if not name_val:
+                            name_val = str(matching_row['Client'].values[0]).strip()
+                if not name_val:
+                    name_val = key.title()
+                master_rows.append({'Client': name_val, 'Hours_Spent': hours_val, 'Labor_Cost': cost_val, 'Monthly_Revenue': rev_val, 'match_key': key})
+            
+            df_master = pd.DataFrame(master_rows)
+            df_master['Net Profit ($)'] = df_master['Monthly_Revenue'] - df_master['Labor_Cost']
+            df_master['Gross Margin (%)'] = (df_master['Net Profit ($)'] / df_master['Monthly_Revenue'] * 100).fillna(0)
+            df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
+            
+            if is_admin:
+                st.markdown(f"### 👑 Financial Performance Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
+                t_rev = df_master['Monthly_Revenue'].sum()
+                t_cost = df_master['Labor_Cost'].sum()
+                f_prof = t_rev - t_cost
+                f_marg = (f_prof / t_rev * 100) if t_rev > 0 else 0
                 
-                clockify_summary = pd.DataFrame(columns=['Client', 'Hours_Spent', 'Labor_Cost', 'match_key'])
-                if not client_df.empty:
-                    c_sum = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
-                    rates_map = {}
-                    matching_rate_cols = [rates_date_map.get(m) for m in active_months if rates_date_map.get(m)]
-                    
-                    if matching_rate_cols:
-                        for idx, row in rates_sheet.iterrows():
-                            u_name = str(row['User']).strip()
-                            vals = [safe_float(row[c]) for c in matching_rate_cols if c in row]
-                            rates_map[u_name] = sum(vals) / len(vals) if vals else 15.0
-                    
-                    c_sum['Cost Rate'] = c_sum['User'].str.strip().map(rates_map).fillna(15.0)
-                    c_sum['Total Cost'] = c_sum['Duration (decimal)'].astype(float) * c_sum['Cost Rate']
-                    clockify_summary = c_sum.groupby('Client').agg(Hours_Spent=('Duration (decimal)', 'sum'), Labor_Cost=('Total Cost', 'sum')).reset_index()
-                    clockify_summary['match_key'] = clockify_summary['Client'].str.strip().str.lower()
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Total Range Revenue", f"${t_rev:,.2f}")
+                c2.metric("Labor Payroll Cost", f"${t_cost:,.2f}")
+                c3.metric("True Gross Margin", f"{f_marg:.1f}%")
+                c4.metric("Total Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
                 
-                smoothed_revenue_map = {}
-                raw_display_names = {}
-                for idx, row in revenue_sheet.iterrows():
-                    raw_name = str(row[client_col_name]).strip()
-                    if pd.isna(row[client_col_name]) or raw_name == "" or "total" in raw_name.lower():
-                        continue
-                    c_name = raw_name.lower()
-                    raw_display_names[c_name] = raw_name
-                    frequency = str(row[freq_col_name]).strip().lower() if freq_col_name in revenue_sheet.columns else 'monthly'
-                    
-                    total_range_revenue = 0.0
-                    for m_str in active_months:
-                        actual_rev_col = rev_date_map.get(m_str)
-                        if actual_rev_col and actual_rev_col in row:
-                            month_val = safe_float(row[actual_rev_col])
-                            if 'quarter' in frequency:
-                                total_range_revenue += (month_val / 3.0)
-                            else:
-                                total_range_revenue += month_val
-                    smoothed_revenue_map[c_name] = total_range_revenue
+                st.markdown("### 📈 Visual Firm Diagnostics")
+                chart_df = df_master.sort_values(by='Monthly_Revenue', ascending=False).head(15)
+                fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Labor Cost Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#2ecc71', '#e74c3c'])
+                fig_compare.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig_compare, use_container_width=True)
                 
-                all_unique_keys = set(smoothed_revenue_map.keys()).union(set(clockify_summary['match_key'].unique()) if not clockify_summary.empty else set())
-                master_rows = []
-                for key in all_unique_keys:
-                    rev_val = smoothed_revenue_map.get(key, 0.0)
-                    hours_val, cost_val = 0.0, 0.0
-                    name_val = raw_display_names.get(key, None)
-                    
-                    if not clockify_summary.empty:
-                        matching_row = clockify_summary[clockify_summary['match_key'] == key]
-                        if not matching_row.empty:
-                            hours_val = float(matching_row['Hours_Spent'].values[0])
-                            cost_val = float(matching_row['Labor_Cost'].values[0])
-                            if not name_val:
-                                name_val = str(matching_row['Client'].values[0]).strip()
-                    if not name_val:
-                        name_val = key.title()
-                    master_rows.append({'Client': name_val, 'Hours_Spent': hours_val, 'Labor_Cost': cost_val, 'Monthly_Revenue': rev_val, 'match_key': key})
+                margin_df = df_master[df_master['Monthly_Revenue'] > 0].sort_values(by='Gross Margin (%)', ascending=True)
+                fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on Investment (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 20))
+                st.plotly_chart(fig_margin, use_container_width=True)
                 
-                df_master = pd.DataFrame(master_rows)
-                df_master['Net Profit ($)'] = df_master['Monthly_Revenue'] - df_master['Labor_Cost']
-                df_master['Gross Margin (%)'] = (df_master['Net Profit ($)'] / df_master['Monthly_Revenue'] * 100).fillna(0)
-                df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
+                df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
+                st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
+                    "Client": st.column_config.TextColumn("Client"),
+                    "Hours_Spent": st.column_config.NumberColumn("Hours Spent", format="%.2f hrs"),
+                    "Labor_Cost": st.column_config.NumberColumn("Labor Cost", format="$%.2f"),
+                    "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f"),
+                    "Net Profit ($)": st.column_config.NumberColumn("Net Profit ($)", format="$%.2f"),
+                    "Gross Margin (%)": st.column_config.NumberColumn("Gross Margin (%)", format="%.1f%%"),
+                    "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Effective Hourly Rate (EHR)", format="$%.2f/hr")
+                })
                 
-                if is_admin:
-                    st.markdown(f"### 👑 Financial Performance Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
-                    t_rev = df_master['Monthly_Revenue'].sum()
-                    t_cost = df_master['Labor_Cost'].sum()
-                    f_prof = t_rev - t_cost
-                    f_marg = (f_prof / t_rev * 100) if t_rev > 0 else 0
-                    
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Total Range Revenue", f"${t_rev:,.2f}")
-                    c2.metric("Labor Payroll Cost", f"${t_cost:,.2f}")
-                    c3.metric("True Gross Margin", f"{f_marg:.1f}%")
-                    c4.metric("Total Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
-                    
-                    st.markdown("### 📈 Visual Firm Diagnostics")
-                    chart_df = df_master.sort_values(by='Monthly_Revenue', ascending=False).head(15)
-                    fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Labor Cost Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#2ecc71', '#e74c3c'])
-                    fig_compare.update_layout(xaxis_tickangle=-45)
-                    st.plotly_chart(fig_compare, use_container_width=True)
-                    
-                    margin_df = df_master[df_master['Monthly_Revenue'] > 0].sort_values(by='Gross Margin (%)', ascending=True)
-                    fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on Investment (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 20))
-                    st.plotly_chart(fig_margin, use_container_width=True)
-                    
-                    df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
-                    st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
-                        "Client": st.column_config.TextColumn("Client"),
-                        "Hours_Spent": st.column_config.NumberColumn("Hours Spent", format="%.2f hrs"),
-                        "Labor_Cost": st.column_config.NumberColumn("Labor Cost", format="$%.2f"),
-                        "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f"),
-                        "Net Profit ($)": st.column_config.NumberColumn("Net Profit ($)", format="$%.2f"),
-                        "Gross Margin (%)": st.column_config.NumberColumn("Gross Margin (%)", format="%.1f%%"),
-                        "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Effective Hourly Rate (EHR)", format="$%.2f/hr")
-                    })
-                    
-                    st.markdown("---")
-                    st.markdown("### 🔍 Admin Bookkeeping & Data Reconciliation Room")
-                    sheet_total_revenue = sum(smoothed_revenue_map.values())
-                    col_audit1, col_audit2 = st.columns(2)
-                    with col_audit1:
-                        st.info(f"📋 **Total Revenue expected by Google Sheet calculations:** `${sheet_total_revenue:,.2f}`")
-                    with col_audit2:
-                        if abs(sheet_total_revenue - t_rev) < 0.01:
-                            st.success("Perfect Match! Every single dollar inside your Google Sheet is accounted for.")
-                        else:
-                            st.warning(f"⚠️ **Discrepancy Amount:** `${sheet_total_revenue - t_rev:,.2f}` is unmatched.")
-                    
-                    clockify_tracked_keys = set(client_df['Client'].str.strip().str.lower().unique()) if not client_df.empty else set()
-                    untracked_revenue_clients = []
-                    for key, revenue in smoothed_revenue_map.items():
-                        if key not in clockify_tracked_keys and revenue > 0:
-                            untracked_revenue_clients.append({"Google Sheet Name": raw_display_names.get(key, key), "Revenue Captured": f"${revenue:,.2f}", "Status": "Captured! Displayed on Leaderboard with 0 hrs logged."})
-                    if untracked_revenue_clients:
-                        st.write("#### 💡 Captured Revenue with 0 Hours Logged (e.g., Okeya Stationery)")
-                        st.dataframe(pd.DataFrame(untracked_revenue_clients), use_container_width=True, hide_index=True)
-                    
-                    st.markdown("### ⚠️ Account Profitability Alerts")
-                    underpriced = df_master[(df_master['Gross Margin (%)'] < 40) & (df_master['Hours_Spent'] > 0)]
-                    if not underpriced.empty:
-                        for idx, row in underpriced.iterrows():
-                            if row['Monthly_Revenue'] == 0:
-                                st.error(f"**Write-off Alert on {row['Client']}:** Logged {row['Hours_Spent']:.2f} hrs with $0.00 Revenue.")
-                            else:
-                                st.warning(f"**Low Margin Alert on {row['Client']}:** Margin is {row['Gross Margin (%)']:.1f}%. EHR is ${row['Effective Hourly Rate (EHR)']:.2f}/hr.")
-                else:
-                    st.info("🔒 Employee view active. Enter Admin Password in sidebar to reveal financials.")
-                    if not client_df.empty:
-                        staff = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
-                        st.dataframe(staff.rename(columns={'Duration (decimal)': 'Hours Tracked'}), use_container_width=True, hide_index=True)
+                st.markdown("---")
+                st.markdown("### 🔍 Admin Bookkeeping & Data Reconciliation Room")
+                sheet_total_revenue = sum(smoothed_revenue_map.values())
+                col_audit1, col_audit2 = st.columns(2)
+                with col_audit1:
+                    st.info(f"📋 **Total Revenue expected by Google Sheet calculations:** `${sheet_total_revenue:,.2f}`")
+                with col_audit2:
+                    if abs(sheet_total_revenue - t_rev) < 0.01:
+                        st.success("Perfect Match! Every single dollar inside your Google Sheet is accounted for.")
                     else:
-                        st.warning("No time entries found.")
-            except Exception as e:
-                st.error(f"Google Sheet error: {e}")
+                        st.warning(f"⚠️ **Discrepancy Amount:** `${sheet_total_revenue - t_rev:,.2f}` is unmatched.")
+                
+                clockify_tracked_keys = set(client_df['Client'].str.strip().str.lower().unique()) if not client_df.empty else set()
+                untracked_revenue_clients = []
+                for key, revenue in smoothed_revenue_map.items():
+                    if key not in clockify_tracked_keys and revenue > 0:
+                        untracked_revenue_clients.append({"Google Sheet Name": raw_display_names.get(key, key), "Revenue Captured": f"${revenue:,.2f}", "Status": "Captured! Displayed on Leaderboard with 0 hrs logged."})
+                if untracked_revenue_clients:
+                    st.write("#### 💡 Captured Revenue with 0 Hours Logged (e.g., Okeya Stationery)")
+                    st.dataframe(pd.DataFrame(untracked_revenue_clients), use_container_width=True, hide_index=True)
+                
+                st.markdown("### ⚠️ Account Profitability Alerts")
+                underpriced = df_master[(df_master['Gross Margin (%)'] < 40) & (df_master['Hours_Spent'] > 0)]
+                if not underpriced.empty:
+                    for idx, row in underpriced.iterrows():
+                        if row['Monthly_Revenue'] == 0:
+                            st.error(f"**Write-off Alert on {row['Client']}:** Logged {row['Hours_Spent']:.2f} hrs with $0.00 Revenue.")
+                        else:
+                            st.warning(f"**Low Margin Alert on {row['Client']}:** Margin is {row['Gross Margin (%)']:.1f}%. EHR is ${row['Effective Hourly Rate (EHR)']:.2f}/hr.")
+            else:
+                st.info("🔒 Employee view active. Enter Admin Password in sidebar to reveal financials.")
+                if not client_df.empty:
+                    staff = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
+                    st.dataframe(staff.rename(columns={'Duration (decimal)': 'Hours Tracked'}), use_container_width=True, hide_index=True)
+                else:
+                    st.warning("No time entries found.")
+        except Exception as e:
+            st.error(f"Google Sheet error: {e}")
+else:
+    st.info("👋 **Welcome to the Cloud Dashboard!** The system is online, but the database is currently empty.")
+    st.warning("🔒 **Action Required:** Please enter your Admin Password `fv2026` in the left sidebar and drop your historical Clockify CSV files into the database uploader to populate the system for the first time.")
