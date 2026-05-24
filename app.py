@@ -87,7 +87,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             
     client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
     
-    # 🛠️ FAILSAFE COLUMN DETECTION ENGINE (Uses names first, fallbacks to index positions if text matching fails)
+    # Failsafe index positions for structural changes
     commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower() or 'target' in c.lower()), None)
     if not commit_col_name and len(rates_sheet.columns) > 1:
         commit_col_name = rates_sheet.columns[1]
@@ -185,16 +185,16 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
         c3.metric("Project Gross Margin", f"{f_marg:.1f}%")
         c4.metric("Total Billable Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
         
-        # 📊 TOP POSITIONING: Data frame table display active directly below KPIs
+        # 📌 TABLE 1: CLIENT PROFITABILITY GRID WITH HOVER HOOKS
         df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
-            "Client": st.column_config.TextColumn("Client"),
-            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs"),
-            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f"),
-            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f"),
-            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f"),
-            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%"),
-            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr")
+            "Client": st.column_config.TextColumn("Client", help="The name of the client account from your records."),
+            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs", help="Total cumulative billable client hours logged against this account during the selected date window."),
+            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f", help="Sum of each employee's client hours multiplied by their respective monthly cost rate from your spreadsheet tab."),
+            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f", help="Total combined revenue collected from this account across all months in your selected date range."),
+            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f", help="Formula: Monthly Revenue minus Allocated Labor Cost."),
+            "Gross Margin (%)": st.column_config.NumberColumn("Project Project Gross Margin", format="%.1f%%", help="Formula: (Project Net Profit / Monthly Revenue) * 100. Measures account return efficiency."),
+            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr", help="Formula: Monthly Revenue divided by Total Billable Hours Spent. Tells you exactly how much money the firm brings in for every single hour delivered to this client.")
         })
 
         st.markdown("### Visual Client Diagnostics")
@@ -231,30 +231,31 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
                 
             emp_summary = emp_summary.rename(columns={'Client Hours': 'Client_Hours', 'Internal Overhead': 'Internal_Hours'})
             
-            # Decoupled Scalar Lookup Engines
             def match_commitment_row(clockify_name):
                 c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
                 if not c_clean: return "Variable"
-                for _, r_row in rates_sheet.iterrows():
-                    r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
-                    if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
-                        if commit_col_name in r_row:
-                            val_str = str(r_row[commit_col_name]).strip().replace('.0', '')
-                            if val_str.lower() in ['variable', 'nan', '', 'none']: return "Variable"
-                            return val_str
+                if commit_col_name in rates_sheet.columns:
+                    for _, r_row in rates_sheet.iterrows():
+                        r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                        if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                            if commit_col_name in r_row:
+                                val_str = str(r_row[commit_col_name]).strip().replace('.0', '')
+                                if val_str.lower() in ['variable', 'nan', '', 'none']: return "Variable"
+                                return val_str
                 return "Variable"
                 
             def match_internal_limit_row(clockify_name):
                 c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
                 if not c_clean: return 5.0
-                for _, r_row in rates_sheet.iterrows():
-                    r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
-                    if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
-                        if internal_limit_col in r_row:
-                            try:
-                                return float(str(r_row[internal_limit_col]).strip())
-                            except:
-                                return 5.0
+                if internal_limit_col in rates_sheet.columns:
+                    for _, r_row in rates_sheet.iterrows():
+                        r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                        if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                            if internal_limit_col in r_row:
+                                try:
+                                    return float(str(r_row[internal_limit_col]).strip())
+                                except:
+                                    return 5.0
                 return 5.0
             
             emp_summary['Weekly_Hour_Target'] = emp_summary['User'].apply(match_commitment_row)
@@ -272,7 +273,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             emp_summary['Total_Hours_Logged'] = emp_summary['Client_Hours'] + emp_summary['Internal_Hours']
             emp_summary['True_Utilization_Rate'] = (emp_summary['Client_Hours'] / emp_summary['Total_Hours_Logged'] * 100).fillna(0)
             
-            # --- ⚙️ DYNAMIC CAPACITY OVERHEAD MATH ENGINE ---
+            # --- ⚙️ CAPACITY OVERHEAD MATH ENGINE ---
             emp_summary['Avg_Client_Hours_Per_Week'] = emp_summary['Client_Hours'] / total_weeks
             emp_summary['Avg_Internal_Hours_Per_Week'] = emp_summary['Internal_Hours'] / total_weeks
             emp_summary['Target_Numeric'] = pd.to_numeric(emp_summary['Weekly_Hour_Target'], errors='coerce').fillna(0.0)
@@ -295,20 +296,21 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
             emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
             
+            # 📌 TABLE 2: TEAM STAFF CAPACITY GRID WITH HOVER HOOKS
             emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
-                "User": st.column_config.TextColumn("Employee Name"),
-                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs"),
-                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs"),
-                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f"),
-                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f"),
-                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
-                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Target Milestone"),
-                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk"),
-                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk"),
-                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk"),
-                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation")
+                "User": st.column_config.TextColumn("Employee Name", help="Employee's name or raw tracking login key from your Clockify system workspace logs."),
+                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Total cumulative production hours logged against standard revenue-generating accounts during this filtered window."),
+                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Total cumulative time logged under your firm's 'Internal' client tracker tag for operations, admin tasks, or meetings."),
+                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
+                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f", help="Formula: Non-billable Internal Overhead Hours multiplied by the employee's average historical rate for the period."),
+                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%", help="Formula: (Client Hours / Total Logged Hours) * 100. Measures direct delivery focus allocation."),
+                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Target Milestone", help="Weekly contract commitment baseline hours pulled directly from Column B of your master spreadsheet tab."),
+                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged client hours divided by the total number of calendar weeks in your selected date range filter."),
+                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged internal administrative hours divided by the total number of calendar weeks in your filter range."),
+                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Formula: Weekly Hour Target minus (Avg Client Hours/Wk + the lesser of your Allowed Internal Limit or Avg Internal Hours/Wk). Tells you exactly how many hours this person has available for new clients."),
+                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Status interpretation of Open Bandwidth. Greater than 3 open hours = Available Capacity; Between -2 and 3 hours = At Optimum Capacity; Under -2 hours = Maxed Out / Overextended.")
             })
             
             st.info("💡 **Hiring & Resource Allocation Guide:** Look at the top rows of this tracker. These employees have open bandwidth available to take on more accounts right now because unapproved internal work past your Google Sheet limit is counted as free capacity.")
