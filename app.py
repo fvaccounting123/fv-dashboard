@@ -88,7 +88,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
     client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
     commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower()), "Commitment")
     
-    # Target Column C explicitly by name match
+    # Target Column C explicitly by keyword match
     internal_limit_col = next((c for c in rates_sheet.columns if 'allowed' in c.lower() or 'limit' in c.lower() or 'internal' in c.lower()), rates_sheet.columns[2])
     
     def safe_float(value):
@@ -221,31 +221,34 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
                 
             emp_summary = emp_summary.rename(columns={'Client Hours': 'Client_Hours', 'Internal Overhead': 'Internal_Hours'})
             
-            def get_sheet_row(clockify_name):
+            # Safe Isolated Scalar Lookup Engines
+            def match_commitment_row(clockify_name):
                 c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
-                if not c_clean: return None
-                for _, r_row in rates_sheet.iterrows():
-                    r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
-                    if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
-                        return r_row
-                return None
-            
-            emp_summary['Sheet_Row'] = emp_summary['User'].apply(get_sheet_row)
-            
-            def get_commitment(row):
-                if row['Sheet_Row'] is None: return "Variable"
-                val = str(row['Sheet_Row'][commit_col_name]).strip().replace('.0', '')
-                return "Variable" if val.lower() in ['variable', 'nan', '', 'none'] else val
+                if not c_clean: return "Variable"
+                if commit_col_name in rates_sheet.columns:
+                    for _, r_row in rates_sheet.iterrows():
+                        r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                        if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                            val_str = str(r_row[commit_col_name]).strip().replace('.0', '')
+                            if val_str.lower() in ['variable', 'nan', '', 'none']: return "Variable"
+                            return val_str
+                return "Variable"
                 
-            def get_internal_limit(row):
-                if row['Sheet_Row'] is None: return 5.0
-                try:
-                    return float(str(row['Sheet_Row'][internal_limit_col]).strip())
-                except:
-                    return 5.0
+            def match_internal_limit_row(clockify_name):
+                c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
+                if not c_clean: return 5.0
+                if internal_limit_col in rates_sheet.columns:
+                    for _, r_row in rates_sheet.iterrows():
+                        r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                        if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                            try:
+                                return float(str(r_row[internal_limit_col]).strip())
+                            except:
+                                return 5.0
+                return 5.0
             
-            emp_summary['Weekly_Hour_Target'] = emp_summary.apply(get_commitment, axis=1)
-            emp_summary['Allowed_Internal_Limit'] = emp_summary.apply(get_internal_limit, axis=1)
+            emp_summary['Weekly_Hour_Target'] = emp_summary['User'].apply(match_commitment_row)
+            emp_summary['Allowed_Internal_Limit'] = emp_summary['User'].apply(match_internal_limit_row)
             
             delta_days = (focus_end - focus_start).days + 1
             total_weeks = max(0.1, delta_days / 7.0)
