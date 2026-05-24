@@ -173,7 +173,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
     df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
     
     if is_admin:
-        st.markdown(f"### Client Financial Profitability Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
+        st.markdown("### Client Financial Profitability Leaderboard")
         t_rev = df_master['Monthly_Revenue'].sum()
         t_cost = df_master['Labor_Cost'].sum()
         f_prof = t_rev - t_cost
@@ -193,7 +193,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f", help="Sum of each employee's client hours multiplied by their respective monthly cost rate from your spreadsheet tab."),
             "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f", help="Total combined revenue collected from this account across all months in your selected date range."),
             "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f", help="Formula: Monthly Revenue minus Allocated Labor Cost."),
-            "Gross Margin (%)": st.column_config.NumberColumn("Project Project Gross Margin", format="%.1f%%", help="Formula: (Project Net Profit / Monthly Revenue) * 100. Measures account return efficiency."),
+            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%", help="Formula: (Project Net Profit / Monthly Revenue) * 100. Measures account return efficiency."),
             "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr", help="Formula: Monthly Revenue divided by Total Billable Hours Spent. Tells you exactly how much money the firm brings in for every single hour delivered to this client.")
         })
 
@@ -271,7 +271,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             emp_summary['Total_Hours_Logged'] = emp_summary['Client_Hours'] + emp_summary['Internal_Hours']
             emp_summary['True_Utilization_Rate'] = (emp_summary['Client_Hours'] / emp_summary['Total_Hours_Logged'] * 100).fillna(0)
             
-            # --- ⚙️ CAPACITY OVERHEAD MATH ENGINE ---
+            # --- CAPACITY OVERHEAD MATH ENGINE ---
             emp_summary['Avg_Client_Hours_Per_Week'] = emp_summary['Client_Hours'] / total_weeks
             emp_summary['Avg_Internal_Hours_Per_Week'] = emp_summary['Internal_Hours'] / total_weeks
             emp_summary['Target_Numeric'] = pd.to_numeric(emp_summary['Weekly_Hour_Target'], errors='coerce').fillna(0.0)
@@ -294,7 +294,6 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
             emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
             
-            # TABLE 2: UPDATED HEADER LABEL TO "Weekly Hours Target" WITH HOVER EXPLANATIONS
             emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
@@ -311,46 +310,45 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
                 "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Status interpretation of Open Bandwidth. Greater than 3 open hours = Available Capacity; Between -2 and 3 hours = At Optimum Capacity; Under -2 hours = Maxed Out / Overextended.")
             })
             
-            st.info("💡 **Hiring & Resource Allocation Guide:** Look at the top rows of this tracker. These employees have open bandwidth available to take on more accounts right now because unapproved internal work past your Google Sheet limit is counted as free capacity.")
+            st.info("Hiring and Resource Allocation Guide: Look at the top rows of this tracker. These employees have open bandwidth available to take on more accounts right now because unapproved internal work past your Google Sheet limit is counted as free capacity.")
             
-            # --- 🚀 AUTOMATED DYNAMIC TAKEAWAYS BLOCK ---
+            # --- AUTOMATED TAKEAWAYS BLOCK ---
             st.markdown("---")
-            st.markdown("### 🎯 Executive Insights & Top Strategic Takeaways")
+            st.markdown("### Executive Insights and Top Strategic Takeaways")
             col_tk1, col_tk2 = st.columns(2)
             
             with col_tk1:
-                st.markdown("#### 📉 Top 3 Client Profitability Leaks")
-                leak_df = df_master[df_master['Hours_Spent'] > 0].sort_values(by='Gross Margin (%)', ascending=True).head(3)
+                st.markdown("#### Top 3 Client Profitability Leaks")
+                # CRITICAL RULE CHANGE: Client must have actual hours logged AND revenue greater than $0.00
+                valid_leaks = df_master[(df_master['Hours_Spent'] > 0) & (df_master['Monthly_Revenue'] > 0)]
+                leak_df = valid_leaks.sort_values(by='Gross Margin (%)', ascending=True).head(3)
                 if not leak_df.empty:
                     for _, r in leak_df.iterrows():
-                        if r['Monthly_Revenue'] == 0:
-                            st.error(f"**{r['Client']}** (Write-off Account): Logged **{r['Hours_Spent']:.2f} hrs** with **$0.00** captured revenue.")
-                        else:
-                            st.warning(f"**{r['Client']}**: Running at a low **{r['Gross Margin (%)']:.1f}%** margin. Realized return is **${r['Effective Hourly Rate (EHR)']:.2f}/hr** on **{r['Hours_Spent']:.2f} hrs** of work.")
+                        st.warning(f"**{r['Client']}**: Running at a low **{r['Gross Margin (%)']:.1f}%** margin. Realized return is **${r['Effective Hourly Rate (EHR)']:.2f}/hr** on **{r['Hours_Spent']:.2f} hrs** of work.")
                 else:
-                    st.write("No direct client accounts logged delivery hours within this time window frame.")
+                    st.write("No active client accounts met the insight threshold parameters within this timeframe window.")
                     
             with col_tk2:
-                st.markdown("#### 👥 Top 3 Employee Capacity & Overhead Focuses")
+                st.markdown("#### Top 3 Employee Capacity and Overhead Focuses")
                 takeaways_emp = []
                 # 1. Capture high availability bandwidth
                 high_cap = emp_summary[emp_summary['Weekly_Hour_Target'].str.lower() != 'variable'].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
                 for _, r in high_cap.head(2).iterrows():
                     if r['Available_Weekly_Bandwidth'] > 2.0:
-                        takeaways_emp.append(f"🟢 **{r['User']}** has **{r['Available_Weekly_Bandwidth']:.2f} open hrs/wk** available. Prime resource allocation candidate for new accounts.")
+                        takeaways_emp.append(f"Employee **{r['User']}** has **{r['Available_Weekly_Bandwidth']:.2f} open hrs/wk** available. Prime resource allocation candidate for new accounts.")
                 
                 # 2. Capture high unapproved internal tasks leaks
                 high_int = emp_summary.sort_values(by='Avg_Internal_Hours_Per_Week', ascending=False)
                 for _, r in high_int.iterrows():
                     if r['Avg_Internal_Hours_Per_Week'] > (r['Allowed_Internal_Limit'] + 1.0):
                         excess = r['Avg_Internal_Hours_Per_Week'] - r['Allowed_Internal_Limit']
-                        takeaways_emp.append(f"⚠️ **{r['User']}** is logging heavy administrative time at **{r['Avg_Internal_Hours_Per_Week']:.2f} hrs/wk** (Exceeds sheet limit by **{excess:.2f} hrs/wk**).")
+                        takeaways_emp.append(f"Employee **{r['User']}** is logging heavy administrative time at **{r['Avg_Internal_Hours_Per_Week']:.2f} hrs/wk** (Exceeds sheet limit by **{excess:.2f} hrs/wk**).")
                 
                 # 3. Fallback to utilization metrics if counts are short
                 if len(takeaways_emp) < 3:
                     low_util = emp_summary.sort_values(by='True_Utilization_Rate', ascending=True)
                     for _, r in low_util.head(3 - len(takeaways_emp)).iterrows():
-                        takeaways_emp.append(f"📊 **{r['User']}** has an overall utilization rate of **{r['True_Utilization_Rate']:.1f}%** (Billable: {r['Client_Hours']:.1f} hrs | Overhead: {r['Internal_Hours']:.1f} hrs).")
+                        takeaways_emp.append(f"Employee **{r['User']}** has an overall utilization rate of **{r['True_Utilization_Rate']:.1f}%** (Billable: {r['Client_Hours']:.1f} hrs | Overhead: {r['Internal_Hours']:.1f} hrs).")
                 
                 for t in takeaways_emp[:3]:
                     st.write(t)
