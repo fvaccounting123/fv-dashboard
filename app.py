@@ -40,6 +40,7 @@ except Exception as e:
     st.error(f"Google Sheet Data Load Error: {e}")
     st.stop()
 
+# Standardize column labels immediately
 revenue_sheet.columns = revenue_sheet.columns.str.strip()
 rates_sheet.columns = rates_sheet.columns.str.strip()
 master_clockify.columns = master_clockify.columns.str.strip()
@@ -87,6 +88,9 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
     client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
     commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower()), "Commitment")
     
+    # Target Column C explicitly by name match
+    internal_limit_col = next((c for c in rates_sheet.columns if 'allowed' in c.lower() or 'limit' in c.lower() or 'internal' in c.lower()), rates_sheet.columns[2])
+    
     def safe_float(value):
         try:
             if pd.isna(value): return 0.0
@@ -100,24 +104,19 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
     internal_mask = month_clockify['Client'].str.strip().str.lower() == 'internal'
     client_df = month_clockify[~internal_mask]
     
+    # Process base cost mappings from your monthly cost columns
+    rates_map = {}
+    matching_rate_cols = [rates_date_map.get(m) for m in active_months if rates_date_map.get(m)]
+    if matching_rate_cols:
+        for idx, row in rates_sheet.iterrows():
+            raw_user = str(row['User']).strip().lower()
+            u_name = raw_user.split('@')[0].split('.')[0]
+            vals = [safe_float(row[col]) for col in matching_rate_cols if col in row]
+            rates_map[u_name] = sum(vals) / len(vals) if vals else 15.0
+            
     clockify_summary = pd.DataFrame(columns=['Client', 'Hours_Spent', 'Labor_Cost', 'match_key'])
     if not client_df.empty:
         c_sum = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
-        rates_map = {}
-        matching_rate_cols = [rates_date_map.get(m) for m in active_months if rates_date_map.get(m)]
-        
-        if matching_rate_cols:
-            for idx, row in rates_sheet.iterrows():
-                raw_user = str(row['User']).strip().lower()
-                u_name = raw_user.split('@')[0].split('.')[0]
-                
-                vals = []
-                for c in matching_rate_cols:
-                    if c in row:
-                        vals.append(safe_float(row[c]))
-                
-                rates_map[u_name] = sum(vals) / len(vals) if vals else 15.0
-        
         c_sum['Clean_User_Key'] = c_sum['User'].str.strip().str.lower().apply(lambda x: x.split('@')[0].split('.')[0])
         c_sum['Cost Rate'] = c_sum['Clean_User_Key'].map(rates_map).fillna(15.0)
         c_sum['Total Cost'] = c_sum['Duration (decimal)'].astype(float) * c_sum['Cost Rate']
@@ -164,23 +163,22 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
     df_master['Gross Margin (%)'] = (df_master['Net Profit ($)'] / df_master['Monthly_Revenue'] * 100).fillna(0)
     df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
     
-    # 🔐 ROLE SECURITY GATEWAY
     if is_admin:
-        st.markdown(f"### Financial Performance Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
+        st.markdown(f"### Client Financial Profitability Leaderboard ({focus_start.strftime('%b %d')} - {focus_end.strftime('%b %d, %Y')})")
         t_rev = df_master['Monthly_Revenue'].sum()
         t_cost = df_master['Labor_Cost'].sum()
         f_prof = t_rev - t_cost
         f_marg = (f_prof / t_rev * 100) if t_rev > 0 else 0
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Range Revenue", f"${t_rev:,.2f}")
-        c2.metric("Labor Payroll Cost", f"${t_cost:,.2f}")
-        c3.metric("True Gross Margin", f"{f_marg:.1f}%")
-        c4.metric("Total Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
+        c1.metric("Total Captured Revenue", f"${t_rev:,.2f}")
+        c2.metric("Allocated Project Labor Cost", f"${t_cost:,.2f}")
+        c3.metric("Project Gross Margin", f"{f_marg:.1f}%")
+        c4.metric("Total Billable Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
         
-        st.markdown("### Visual Firm Diagnostics")
+        st.markdown("### Visual Client Diagnostics")
         chart_df = df_master.sort_values(by='Monthly_Revenue', ascending=False).head(15)
-        fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Labor Cost Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#2ecc71', '#e74c3c'])
+        fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Allocated Labor Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#2ecc71', '#e74c3c'])
         fig_compare.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig_compare, use_container_width=True)
         
@@ -191,23 +189,22 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
         df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
             "Client": st.column_config.TextColumn("Client"),
-            "Hours_Spent": st.column_config.NumberColumn("Hours Spent", format="%.2f hrs"),
-            "Labor_Cost": st.column_config.NumberColumn("Labor Cost", format="$%.2f"),
+            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs"),
+            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f"),
             "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f"),
-            "Net Profit ($)": st.column_config.NumberColumn("Net Profit ($)", format="$%.2f"),
-            "Gross Margin (%)": st.column_config.NumberColumn("Gross Margin (%)", format="%.1f%%"),
-            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Effective Hourly Rate (EHR)", format="$%.2f/hr")
+            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f"),
+            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%"),
+            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr")
         })
         
         # --- EMPLOYEE CAPACITY & UTILIZATION TRACKER WORKSPACE ---
         st.markdown("---")
-        st.markdown("### Employee Capacity & Utilization Tracker")
+        st.markdown("### Team Staff Capacity & Available Bandwidth Tracker")
         
         if not month_clockify.empty:
             m_clock_cp = month_clockify.copy()
             m_clock_cp['Is_Internal_Type'] = m_clock_cp['Client'].str.strip().str.lower().apply(lambda x: 'Internal Overhead' if x == 'internal' else 'Client Hours')
             
-            # CRITICAL ATTR FIX: Uses Pivot Table with safe fill defaults to handle non-internal users safely
             emp_summary = pd.pivot_table(
                 m_clock_cp, 
                 values='Duration (decimal)', 
@@ -217,58 +214,91 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
                 fill_value=0.0
             ).reset_index()
             
-            # Guarantee both columns exist even if no user logged overhead hours
             if 'Client Hours' not in emp_summary.columns:
                 emp_summary['Client Hours'] = 0.0
             if 'Internal Overhead' not in emp_summary.columns:
                 emp_summary['Internal Overhead'] = 0.0
                 
             emp_summary = emp_summary.rename(columns={'Client Hours': 'Client_Hours', 'Internal Overhead': 'Internal_Hours'})
-            emp_summary['Total_Hours'] = emp_summary['Client_Hours'] + emp_summary['Internal_Hours']
-            emp_summary['Utilization_%'] = (emp_summary['Client_Hours'] / emp_summary['Total_Hours'] * 100).fillna(0)
+            
+            def get_sheet_row(clockify_name):
+                c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
+                if not c_clean: return None
+                for _, r_row in rates_sheet.iterrows():
+                    r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                    if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                        return r_row
+                return None
+            
+            emp_summary['Sheet_Row'] = emp_summary['User'].apply(get_sheet_row)
+            
+            def get_commitment(row):
+                if row['Sheet_Row'] is None: return "Variable"
+                val = str(row['Sheet_Row'][commit_col_name]).strip().replace('.0', '')
+                return "Variable" if val.lower() in ['variable', 'nan', '', 'none'] else val
+                
+            def get_internal_limit(row):
+                if row['Sheet_Row'] is None: return 5.0
+                try:
+                    return float(str(row['Sheet_Row'][internal_limit_col]).strip())
+                except:
+                    return 5.0
+            
+            emp_summary['Weekly_Hour_Target'] = emp_summary.apply(get_commitment, axis=1)
+            emp_summary['Allowed_Internal_Limit'] = emp_summary.apply(get_internal_limit, axis=1)
             
             delta_days = (focus_end - focus_start).days + 1
             total_weeks = max(0.1, delta_days / 7.0)
-            emp_summary['Avg_Hours_Per_Week'] = emp_summary['Total_Hours'] / total_weeks
             
-            # Dynamic Commitment Mapping Engine (Substring & Email Subtraction)
-            commit_map = {}
-            if commit_col_name in rates_sheet.columns:
-                for idx, row in rates_sheet.iterrows():
-                    raw_cell_user = str(row['User']).strip().lower()
-                    clean_sheet_key = raw_cell_user.split('@')[0].split('.')[0]
-                    raw_cell_str = str(row[commit_col_name]).strip().replace('.0', '')
-                    commit_map[clean_sheet_key] = raw_cell_str
+            emp_summary['Clean_Key'] = emp_summary['User'].str.strip().str.lower().apply(lambda x: x.split('@')[0].split('.')[0])
+            emp_summary['Hourly_Rate'] = emp_summary['Clean_Key'].map(rates_map).fillna(15.0)
             
-            emp_summary['Clean_Clockify_Key'] = emp_summary['User'].str.strip().str.lower().apply(lambda x: x.split('@')[0].split('.')[0])
-            emp_summary['Commitment'] = emp_summary['Clean_Clockify_Key'].map(commit_map).fillna('Variable')
-            emp_summary['Commitment'] = emp_summary['Commitment'].apply(lambda x: 'Variable' if x.lower() in ['variable', 'nan', ''] else x)
+            emp_summary['Client_Labor_Cost'] = emp_summary['Client_Hours'] * emp_summary['Hourly_Rate']
+            emp_summary['Internal_Labor_Cost'] = emp_summary['Internal_Hours'] * emp_summary['Hourly_Rate']
             
-            # VECTORIZED VARIANCE TRACKER
-            emp_summary['Commitment_Numeric'] = pd.to_numeric(emp_summary['Commitment'], errors='coerce').fillna(0.0)
-            emp_summary['Weekly_Variance'] = emp_summary['Avg_Hours_Per_Week'] - emp_summary['Commitment_Numeric']
-            emp_summary.loc[emp_summary['Commitment'].str.lower() == 'variable', 'Weekly_Variance'] = 0.0
+            emp_summary['Total_Hours_Logged'] = emp_summary['Client_Hours'] + emp_summary['Internal_Hours']
+            emp_summary['True_Utilization_Rate'] = (emp_summary['Client_Hours'] / emp_summary['Total_Hours_Logged'] * 100).fillna(0)
             
-            emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Total_Hours', 'Utilization_%', 'Commitment', 'Avg_Hours_Per_Week', 'Weekly_Variance']].sort_values(by='Weekly_Variance', ascending=True)
+            # --- ⚙️ DYNAMIC CAPACITY OVERHEAD MATH ENGINE ---
+            emp_summary['Avg_Client_Hours_Per_Week'] = emp_summary['Client_Hours'] / total_weeks
+            emp_summary['Avg_Internal_Hours_Per_Week'] = emp_summary['Internal_Hours'] / total_weeks
+            emp_summary['Target_Numeric'] = pd.to_numeric(emp_summary['Weekly_Hour_Target'], errors='coerce').fillna(0.0)
+            
+            def calculate_firm_bandwidth(row):
+                if row['Weekly_Hour_Target'].lower() == 'variable': return 0.0
+                allowed_internal = min(row['Allowed_Internal_Limit'], row['Avg_Internal_Hours_Per_Week'])
+                used_hours = row['Avg_Client_Hours_Per_Week'] + allowed_internal
+                return max(0.0, row['Target_Numeric'] - used_hours)
+                
+            def set_firm_capacity_status(row):
+                if row['Weekly_Hour_Target'].lower() == 'variable': return "Flexible / Variable"
+                allowed_internal = min(row['Allowed_Internal_Limit'], row['Avg_Internal_Hours_Per_Week'])
+                used_hours = row['Avg_Client_Hours_Per_Week'] + allowed_internal
+                open_hours = row['Target_Numeric'] - used_hours
+                if open_hours > 3.0: return "Available Capacity"
+                elif open_hours >= -2.0: return "At Optimum Capacity"
+                else: return "Maxed Out / Overextended"
+
+            emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
+            emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
+            
+            emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
                 "User": st.column_config.TextColumn("Employee Name"),
                 "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs"),
                 "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs"),
-                "Total_Hours": st.column_config.NumberColumn("Total Hours Logged", format="%.2f hrs"),
-                "Utilization_%": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
-                "Commitment": st.column_config.TextColumn("Target Commitment"),
-                "Avg_Hours_Per_Week": st.column_config.NumberColumn("Avg Hours / Week", format="%.2f hrs/wk"),
-                "Weekly_Variance": st.column_config.NumberColumn("Weekly Variance", format="%+.2f hrs/wk")
+                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f"),
+                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f"),
+                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
+                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Target Milestone"),
+                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk"),
+                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk"),
+                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk"),
+                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation")
             })
             
-            alert_mask = (emp_disp['Commitment'].str.lower() != 'variable') & (emp_disp['Avg_Hours_Per_Week'] < (pd.to_numeric(emp_disp['Commitment'], errors='coerce').fillna(0.0) - 3.0))
-            flagged_staff = emp_disp[alert_mask]
-            
-            if not flagged_staff.empty:
-                st.warning("Firm Capacity Alerts (Employees Under Committed Targets):")
-                for _, f_row in flagged_staff.iterrows():
-                    st.write(f"{f_row['User']} is trailing behind target commitments by {abs(f_row['Weekly_Variance']):.2f} hours/week (Target: {f_row['Commitment']} hrs/wk | Actual: {f_row['Avg_Hours_Per_Week']:.2f} hrs/wk).")
+            st.info("💡 **Hiring & Resource Allocation Guide:** Look at the top rows of this tracker. These employees have open bandwidth available to take on more accounts right now because unapproved internal work past your Google Sheet limit is counted as free capacity.")
         else:
             st.info("No timeline logs available to generate employee summaries.")
         
@@ -280,7 +310,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
                 if u_row['Monthly_Revenue'] == 0:
                     st.error(f"Write-off Alert on {u_row['Client']}: Logged {u_row['Hours_Spent']:.2f} hrs with $0.00 Revenue.")
                 else:
-                    st.warning(f"Low Margin Alert on {u_row['Client']}: Margin is {u_row['Gross Margin (%)']:.1f}%. EHR is ${u_row['Effective Hourly Rate (EHR)']:.2f}/hr.")
+                    st.warning(f"Low Margin Alert on {u_row['Client']}: Margin is {u_row['Gross Margin (%)']:.1f}%. Realized Client Hourly Return is ${u_row['Effective Hourly Rate (EHR)']:.2f}/hr.")
 
         # --- DATA RECONCILIATION ROOM (BOTTOM) ---
         st.markdown("---")
@@ -305,7 +335,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             st.dataframe(pd.DataFrame(untracked_revenue_clients), use_container_width=True, hide_index=True)
             
     else:
-        # --- STAFF ONLY VIEW (SAFE LOGGED-OUT STATUS) ---
+        # --- STAFF ONLY VIEW ---
         st.info("Employee view active. Enter Admin Password in sidebar to reveal financials.")
         if not client_df.empty:
             staff_view_df = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
