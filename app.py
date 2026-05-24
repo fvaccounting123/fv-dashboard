@@ -86,10 +86,19 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             curr = curr.replace(month=curr.month + 1)
             
     client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
-    commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower()), "Commitment")
     
-    # Target Column C explicitly by keyword match
-    internal_limit_col = next((c for c in rates_sheet.columns if 'allowed' in c.lower() or 'limit' in c.lower() or 'internal' in c.lower()), rates_sheet.columns[2])
+    # 🛠️ FAILSAFE COLUMN DETECTION ENGINE (Uses names first, fallbacks to index positions if text matching fails)
+    commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower() or 'target' in c.lower()), None)
+    if not commit_col_name and len(rates_sheet.columns) > 1:
+        commit_col_name = rates_sheet.columns[1]
+    elif not commit_col_name:
+        commit_col_name = "Commitment"
+        
+    internal_limit_col = next((c for c in rates_sheet.columns if 'allowed' in c.lower() or 'limit' in c.lower() or 'internal' in c.lower()), None)
+    if not internal_limit_col and len(rates_sheet.columns) > 2:
+        internal_limit_col = rates_sheet.columns[2]
+    elif not internal_limit_col:
+        internal_limit_col = "Allowed Internal Hours"
     
     def safe_float(value):
         try:
@@ -176,16 +185,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
         c3.metric("Project Gross Margin", f"{f_marg:.1f}%")
         c4.metric("Total Billable Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
         
-        st.markdown("### Visual Client Diagnostics")
-        chart_df = df_master.sort_values(by='Monthly_Revenue', ascending=False).head(15)
-        fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Allocated Labor Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#2ecc71', '#e74c3c'])
-        fig_compare.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(fig_compare, use_container_width=True)
-        
-        margin_df = df_master[df_master['Monthly_Revenue'] > 0].sort_values(by='Gross Margin (%)', ascending=True)
-        fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on Investment (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 20))
-        st.plotly_chart(fig_margin, use_container_width=True)
-        
+        # 📊 TOP POSITIONING: Data frame table display active directly below KPIs
         df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
             "Client": st.column_config.TextColumn("Client"),
@@ -196,6 +196,16 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%"),
             "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr")
         })
+
+        st.markdown("### Visual Client Diagnostics")
+        chart_df = df_master.sort_values(by='Monthly_Revenue', ascending=False).head(15)
+        fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Allocated Labor Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#2ecc71', '#e74c3c'])
+        fig_compare.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig_compare, use_container_width=True)
+        
+        margin_df = df_master[df_master['Monthly_Revenue'] > 0].sort_values(by='Gross Margin (%)', ascending=True)
+        fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on Investment (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 20))
+        st.plotly_chart(fig_margin, use_container_width=True)
         
         # --- EMPLOYEE CAPACITY & UTILIZATION TRACKER WORKSPACE ---
         st.markdown("---")
@@ -221,14 +231,14 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
                 
             emp_summary = emp_summary.rename(columns={'Client Hours': 'Client_Hours', 'Internal Overhead': 'Internal_Hours'})
             
-            # Safe Isolated Scalar Lookup Engines
+            # Decoupled Scalar Lookup Engines
             def match_commitment_row(clockify_name):
                 c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
                 if not c_clean: return "Variable"
-                if commit_col_name in rates_sheet.columns:
-                    for _, r_row in rates_sheet.iterrows():
-                        r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
-                        if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                for _, r_row in rates_sheet.iterrows():
+                    r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                    if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                        if commit_col_name in r_row:
                             val_str = str(r_row[commit_col_name]).strip().replace('.0', '')
                             if val_str.lower() in ['variable', 'nan', '', 'none']: return "Variable"
                             return val_str
@@ -237,10 +247,10 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             def match_internal_limit_row(clockify_name):
                 c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
                 if not c_clean: return 5.0
-                if internal_limit_col in rates_sheet.columns:
-                    for _, r_row in rates_sheet.iterrows():
-                        r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
-                        if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                for _, r_row in rates_sheet.iterrows():
+                    r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                    if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                        if internal_limit_col in r_row:
                             try:
                                 return float(str(r_row[internal_limit_col]).strip())
                             except:
