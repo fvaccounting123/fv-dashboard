@@ -87,7 +87,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             
     client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
     
-    # Failsafe index positions for structural changes
+    # Failsafe Index Mappers for structural flexibility
     commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower() or 'target' in c.lower()), None)
     if not commit_col_name and len(rates_sheet.columns) > 1:
         commit_col_name = rates_sheet.columns[1]
@@ -185,7 +185,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
         c3.metric("Project Gross Margin", f"{f_marg:.1f}%")
         c4.metric("Total Billable Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
         
-        # 📌 TABLE 1: CLIENT PROFITABILITY GRID WITH HOVER HOOKS
+        # TABLE 1: CLIENT FINANCIAL MATRIX DIRECTLY UNDER KPIS
         df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
             "Client": st.column_config.TextColumn("Client", help="The name of the client account from your records."),
@@ -234,28 +234,26 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             def match_commitment_row(clockify_name):
                 c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
                 if not c_clean: return "Variable"
-                if commit_col_name in rates_sheet.columns:
-                    for _, r_row in rates_sheet.iterrows():
-                        r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
-                        if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
-                            if commit_col_name in r_row:
-                                val_str = str(r_row[commit_col_name]).strip().replace('.0', '')
-                                if val_str.lower() in ['variable', 'nan', '', 'none']: return "Variable"
-                                return val_str
+                for _, r_row in rates_sheet.iterrows():
+                    r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                    if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                        if commit_col_name in r_row:
+                            val_str = str(r_row[commit_col_name]).strip().replace('.0', '')
+                            if val_str.lower() in ['variable', 'nan', '', 'none']: return "Variable"
+                            return val_str
                 return "Variable"
                 
             def match_internal_limit_row(clockify_name):
                 c_clean = str(clockify_name).strip().lower().split('@')[0].split('.')[0].strip()
                 if not c_clean: return 5.0
-                if internal_limit_col in rates_sheet.columns:
-                    for _, r_row in rates_sheet.iterrows():
-                        r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
-                        if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
-                            if internal_limit_col in r_row:
-                                try:
-                                    return float(str(r_row[internal_limit_col]).strip())
-                                except:
-                                    return 5.0
+                for _, r_row in rates_sheet.iterrows():
+                    r_clean = str(r_row['User']).strip().lower().split('@')[0].split('.')[0].strip()
+                    if c_clean == r_clean or c_clean in r_clean or r_clean in c_clean:
+                        if internal_limit_col in r_row:
+                            try:
+                                return float(str(r_row[internal_limit_col]).strip())
+                            except:
+                                return 5.0
                 return 5.0
             
             emp_summary['Weekly_Hour_Target'] = emp_summary['User'].apply(match_commitment_row)
@@ -296,36 +294,68 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
             emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
             
-            # 📌 TABLE 2: TEAM STAFF CAPACITY GRID WITH HOVER HOOKS
+            # TABLE 2: UPDATED HEADER LABEL TO "Weekly Hours Target" WITH HOVER EXPLANATIONS
             emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
                 "User": st.column_config.TextColumn("Employee Name", help="Employee's name or raw tracking login key from your Clockify system workspace logs."),
-                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Total cumulative production hours logged against standard revenue-generating accounts during this filtered window."),
+                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Total cumulative production hours logged against external accounts during this filtered window."),
                 "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Total cumulative time logged under your firm's 'Internal' client tracker tag for operations, admin tasks, or meetings."),
                 "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
                 "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f", help="Formula: Non-billable Internal Overhead Hours multiplied by the employee's average historical rate for the period."),
                 "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%", help="Formula: (Client Hours / Total Logged Hours) * 100. Measures direct delivery focus allocation."),
-                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Target Milestone", help="Weekly contract commitment baseline hours pulled directly from Column B of your master spreadsheet tab."),
+                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target", help="Weekly hour target baseline pulled directly from Column B of your master spreadsheet tab."),
                 "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged client hours divided by the total number of calendar weeks in your selected date range filter."),
                 "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged internal administrative hours divided by the total number of calendar weeks in your filter range."),
-                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Formula: Weekly Hour Target minus (Avg Client Hours/Wk + the lesser of your Allowed Internal Limit or Avg Internal Hours/Wk). Tells you exactly how many hours this person has available for new clients."),
+                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Formula: Weekly Hours Target minus (Avg Client Hours/Wk + the lesser of your Allowed Internal Limit or Avg Internal Hours/Wk). Tells you exactly how many hours this person has available for new clients."),
                 "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Status interpretation of Open Bandwidth. Greater than 3 open hours = Available Capacity; Between -2 and 3 hours = At Optimum Capacity; Under -2 hours = Maxed Out / Overextended.")
             })
             
             st.info("💡 **Hiring & Resource Allocation Guide:** Look at the top rows of this tracker. These employees have open bandwidth available to take on more accounts right now because unapproved internal work past your Google Sheet limit is counted as free capacity.")
+            
+            # --- 🚀 AUTOMATED DYNAMIC TAKEAWAYS BLOCK ---
+            st.markdown("---")
+            st.markdown("### 🎯 Executive Insights & Top Strategic Takeaways")
+            col_tk1, col_tk2 = st.columns(2)
+            
+            with col_tk1:
+                st.markdown("#### 📉 Top 3 Client Profitability Leaks")
+                leak_df = df_master[df_master['Hours_Spent'] > 0].sort_values(by='Gross Margin (%)', ascending=True).head(3)
+                if not leak_df.empty:
+                    for _, r in leak_df.iterrows():
+                        if r['Monthly_Revenue'] == 0:
+                            st.error(f"**{r['Client']}** (Write-off Account): Logged **{r['Hours_Spent']:.2f} hrs** with **$0.00** captured revenue.")
+                        else:
+                            st.warning(f"**{r['Client']}**: Running at a low **{r['Gross Margin (%)']:.1f}%** margin. Realized return is **${r['Effective Hourly Rate (EHR)']:.2f}/hr** on **{r['Hours_Spent']:.2f} hrs** of work.")
+                else:
+                    st.write("No direct client accounts logged delivery hours within this time window frame.")
+                    
+            with col_tk2:
+                st.markdown("#### 👥 Top 3 Employee Capacity & Overhead Focuses")
+                takeaways_emp = []
+                # 1. Capture high availability bandwidth
+                high_cap = emp_summary[emp_summary['Weekly_Hour_Target'].str.lower() != 'variable'].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
+                for _, r in high_cap.head(2).iterrows():
+                    if r['Available_Weekly_Bandwidth'] > 2.0:
+                        takeaways_emp.append(f"🟢 **{r['User']}** has **{r['Available_Weekly_Bandwidth']:.2f} open hrs/wk** available. Prime resource allocation candidate for new accounts.")
+                
+                # 2. Capture high unapproved internal tasks leaks
+                high_int = emp_summary.sort_values(by='Avg_Internal_Hours_Per_Week', ascending=False)
+                for _, r in high_int.iterrows():
+                    if r['Avg_Internal_Hours_Per_Week'] > (r['Allowed_Internal_Limit'] + 1.0):
+                        excess = r['Avg_Internal_Hours_Per_Week'] - r['Allowed_Internal_Limit']
+                        takeaways_emp.append(f"⚠️ **{r['User']}** is logging heavy administrative time at **{r['Avg_Internal_Hours_Per_Week']:.2f} hrs/wk** (Exceeds sheet limit by **{excess:.2f} hrs/wk**).")
+                
+                # 3. Fallback to utilization metrics if counts are short
+                if len(takeaways_emp) < 3:
+                    low_util = emp_summary.sort_values(by='True_Utilization_Rate', ascending=True)
+                    for _, r in low_util.head(3 - len(takeaways_emp)).iterrows():
+                        takeaways_emp.append(f"📊 **{r['User']}** has an overall utilization rate of **{r['True_Utilization_Rate']:.1f}%** (Billable: {r['Client_Hours']:.1f} hrs | Overhead: {r['Internal_Hours']:.1f} hrs).")
+                
+                for t in takeaways_emp[:3]:
+                    st.write(t)
         else:
             st.info("No timeline logs available to generate employee summaries.")
-        
-        # --- ACCOUNT PROFITABILITY ALERTS BLOCK ---
-        st.markdown("### Account Profitability Alerts")
-        underpriced = df_master[(df_master['Gross Margin (%)'] < 40) & (df_master['Hours_Spent'] > 0)]
-        if not underpriced.empty:
-            for _, u_row in underpriced.iterrows():
-                if u_row['Monthly_Revenue'] == 0:
-                    st.error(f"Write-off Alert on {u_row['Client']}: Logged {u_row['Hours_Spent']:.2f} hrs with $0.00 Revenue.")
-                else:
-                    st.warning(f"Low Margin Alert on {u_row['Client']}: Margin is {u_row['Gross Margin (%)']:.1f}%. Realized Client Hourly Return is ${u_row['Effective Hourly Rate (EHR)']:.2f}/hr.")
 
         # --- DATA RECONCILIATION ROOM (BOTTOM) ---
         st.markdown("---")
