@@ -11,17 +11,19 @@ st.set_page_config(page_title="FVA | Dashboard", layout="wide")
 # --- GLOBAL ENTERPRISE LIGHT MODE FORCE & BRANDING ENGINE ---
 st.markdown("""
 <style>
+    /* Force Light Background Globally for All Users */
     .stApp {
         background-color: #FFFFFF !important;
         color: #31333F !important;
     }
+    /* Main Page and Sidebar Component Base Color Resets */
     section[data-testid="stSidebar"] {
         background-color: #F8F9FA !important;
     }
-    html, body, [class*="css"], .stMarkdown, p, span, label, h1, h2, h3, h4, h5, h6 {
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+    html, body, .stMarkdown, p, span, label, h1, h2, h3, h4, h5, h6 {
         color: #31333F !important;
     }
+    /* Brand Accent Background Fills using Custom Forest Green */
     .stMetric {
         background-color: #F8F9FA !important;
         padding: 20px !important;
@@ -31,16 +33,19 @@ st.markdown("""
         border-right: 1px solid #E6E8EA !important;
         border-bottom: 1px solid #E6E8EA !important;
     }
+    /* Forest Green Highlights for Metrics */
     div[data-testid="stMetricValue"] div {
         color: #3D5234 !important;
         font-weight: 700 !important;
     }
+    /* Muted Labels */
     div[data-testid="stMetricLabel"] p {
         color: #5A626A !important;
         font-size: 14px !important;
         letter-spacing: 0.5px !important;
         text-transform: uppercase !important;
     }
+    /* Fix Input Field Labels to stay visible dark gray */
     label[data-testid="stWidgetLabel"] p {
         color: #31333F !important;
     }
@@ -232,7 +237,7 @@ if is_admin:
         
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
             "Client": st.column_config.TextColumn("Client", help="The name of the client account from your records."),
-            "Profitability Action": st.column_config.TextColumn("Profitability Action", help="Automatic action designation based on current margin health and logged labor load."),
+            "Profitability Action": st.column_config.TextColumn("Profitability Action", help="Calculated Rule: 'Immediate Price Review' if Gross Margin is < 40% and Logged Labor is >= 15 hrs. 'Minor Retainer Adjustment' if Margin is < 40% but workload is low (< 15 hrs). Otherwise 'Healthy Margin'."),
             "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs", help="Total cumulative billable client hours logged against this account during the selected date window."),
             "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f", help="Sum of each employee's client hours multiplied by their respective monthly cost rate."),
             "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f", help="Total combined revenue collected from this account across all months in your selected date range."),
@@ -379,7 +384,7 @@ if is_admin:
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
                 "User": st.column_config.TextColumn("Employee Name", help="Employee identity mapped from your logs."),
-                "Assignment Profile": st.column_config.TextColumn("Assignment Profile", help="Strategic context combining open bandwidth metrics with financial support output density."),
+                "Assignment Profile": st.column_config.TextColumn("Assignment Profile", help="Calculated Rule: 'Top Growth Choice' if Open Bandwidth is > 3 hrs/wk AND Revenue Supported/Hr is >= $35/hr. 'Portfolio Strained / Audit' if Open Bandwidth is <= 1 hr/wk AND Revenue Supported/Hr is < $25/hr. Otherwise 'At Operational Capacity'."),
                 "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Cumulative core client project assignment delivery hours logged."),
                 "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Cumulative administrative operations overhead time units."),
                 "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
@@ -391,7 +396,7 @@ if is_admin:
                 "Supported_Revenue": st.column_config.NumberColumn("Supported Revenue", format="$%.2f", help="The total revenue supported by this employee, calculated by weighting client revenue by the employee's share of hours spent on each client."),
                 "Revenue_Supported_Per_Hour": st.column_config.NumberColumn("Revenue Supported / Hour", format="$%.2f/hr", help="Formula: Supported Revenue divided by total logged hours. Measures the financial productivity density of the employee's logged time."),
                 "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Formula: Weekly Hours Target minus used hours capacity."),
-                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Status interpretation of Open Bandwidth.")
+                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Calculated Rule: 'Available Capacity' if Open Weekly Bandwidth is > 3 hrs/wk; 'Maxed Out / Overextended' if Open Weekly Bandwidth is < -2 hrs/wk; otherwise 'At Optimum Capacity'.")
             })
             
             st.info("Hiring and Resource Allocation Guide: Employees are sorted by available capacity. Those at the top have the most open bandwidth available to accept new client assignments based on their target commitments and approved internal time.")
