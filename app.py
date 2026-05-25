@@ -196,13 +196,13 @@ if is_admin:
         df_master['Gross Margin (%)'] = (df_master['Net Profit ($)'] / df_master['Monthly_Revenue'] * 100).fillna(0)
         df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
         
-        # --- DYNAMIC STAGE FILTERING: Drop completely inactive clients for the selected range window ---
+        # --- DYNAMIC STAGE FILTERING ---
         df_master = df_master[(df_master['Hours_Spent'] > 0) | (df_master['Monthly_Revenue'] > 0)].reset_index(drop=True)
         
         # --- DECISION 1: CLIENT PROFITABILITY TRIAGE ---
         def rule_client_triage(row):
             if row['Monthly_Revenue'] == 0 or row['Hours_Spent'] == 0:
-                return "Write-off Account / Inactive"
+                return "Inactive Account"
             if row['Gross Margin (%)'] < 40.0:
                 if row['Hours_Spent'] >= 15.0:
                     return "Immediate Price Review"
@@ -231,13 +231,13 @@ if is_admin:
         
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
             "Client": st.column_config.TextColumn("Client", help="The name of the client account from your records."),
-            "Profitability Action": st.column_config.TextColumn("Profitability Action", help="Calculated Rule: 'Immediate Price Review' if Gross Margin is < 40% and Logged Labor is >= 15 hrs. 'Minor Retainer Adjustment' if Margin is < 40% but workload is low (< 15 hrs). Otherwise 'Healthy Margin'."),
-            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs", help="Total cumulative billable client hours logged against this account during the selected date window."),
-            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f", help="Sum of each employee's client hours multiplied by their respective monthly cost rate."),
-            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f", help="Total combined revenue collected from this account across all months in your selected date range."),
-            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f", help="Formula: Monthly Revenue minus Allocated Labor Cost."),
-            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%", help="Formula: (Project Net Profit / Monthly Revenue) * 100. Measures account return efficiency."),
-            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr", help="Formula: Monthly Revenue divided by Total Billable Hours Spent. Tells you exactly how much money the firm brings in for every single hour delivered to this client.")
+            "Profitability Action": st.column_config.TextColumn("Profitability Action", help="Immediate Price Review if Gross Margin is under 40% and Logged Labor is 15+ hours. Minor Retainer Adjustment if workload is under 15 hours. Otherwise Healthy Margin."),
+            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs"),
+            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f"),
+            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f"),
+            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f"),
+            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%"),
+            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr")
         })
 
         st.markdown("### Visual Client Diagnostics")
@@ -251,8 +251,6 @@ if is_admin:
             margin_df = chart_df.sort_values(by='Gross Margin (%)', ascending=True)
             fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on ROI (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 22))
             st.plotly_chart(fig_margin, use_container_width=True)
-        else:
-            st.write("No active clients with both hours and revenue logged to generate visual diagnostics.")
         
         # --- REVENUE WEIGHT ALLOCATION ENGINE ---
         user_rev_aggregates = {}
@@ -361,37 +359,33 @@ if is_admin:
             emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
             emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
             
-            # --- DECISIONS 2 & 3: STRATEGIC ROUTING PROFILE (RELAXED & REWORDED CRITERIA) ---
-            def rule_assignment_profile(row):
-                if row['Available_Weekly_Bandwidth'] > 3.0:
-                    if row['Revenue_Supported_Per_Hour'] >= 35.0:
-                        return "Top Growth Choice"
-                    return "Available for Assignment"
-                # Relaxed threshold line from $25 down to $15 to isolate only extreme bottlenecks
+            # --- DECISION 2: TRUE FINANCIAL VELOCITY SWITCH ENGINE ---
+            def rule_revenue_drag_profile(row):
+                # Maxed out on time (<= 1 hr open/wk) but generating under $15/hr in supported billing velocity
                 if row['Available_Weekly_Bandwidth'] <= 1.0 and row['Revenue_Supported_Per_Hour'] < 15.0:
                     if row['Weekly_Hour_Target'].lower() != 'variable':
-                        return "High Workload / Low Yield"
-                return "At Operational Capacity"
+                        return "High Workload / Low Payout"
+                return "Balanced Return"
                 
-            emp_summary['Assignment Profile'] = emp_summary.apply(rule_assignment_profile, axis=1)
+            emp_summary['Workload vs Revenue Return'] = emp_summary.apply(rule_revenue_drag_profile, axis=1)
             
-            emp_disp = emp_summary[['User', 'Assignment Profile', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Supported_Revenue', 'Revenue_Supported_Per_Hour', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
+            emp_disp = emp_summary[['User', 'Workload vs Revenue Return', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Supported_Revenue', 'Revenue_Supported_Per_Hour', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
-                "User": st.column_config.TextColumn("Employee Name", help="Employee identity mapped from your logs."),
-                "Assignment Profile": st.column_config.TextColumn("Assignment Profile", help="Calculated Rule: 'Top Growth Choice' if Open Bandwidth is > 3 hrs/wk AND Revenue Supported/Hr is >= $35/hr. 'High Workload / Low Yield' if Open Bandwidth is <= 1 hr/wk AND Revenue Supported/Hr is < $15/hr. Otherwise 'At Operational Capacity'."),
-                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Cumulative core client project assignment delivery hours logged."),
-                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Cumulative administrative operations overhead time units."),
-                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
-                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f", help="Formula: Non-billable Internal Overhead Hours multiplied by the employee's average historical rate for the period."),
-                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%", help="Formula: (Client Hours / Total Logged Hours) * 100. Measures direct delivery focus allocation."),
-                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target", help="Weekly hour target baseline pulled directly from your commitment parameters."),
-                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged client hours divided by the total number of calendar weeks."),
-                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged internal administrative hours divided by the total number of weeks."),
-                "Supported_Revenue": st.column_config.NumberColumn("Supported Revenue", format="$%.2f", help="The total revenue supported by this employee, calculated by weighting client revenue by the employee's share of hours spent on each client."),
-                "Revenue_Supported_Per_Hour": st.column_config.NumberColumn("Revenue Supported / Hour", format="$%.2f/hr", help="Formula: Supported Revenue divided by total logged hours. Measures the financial productivity density of the employee's logged time."),
-                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Formula: Weekly Hours Target minus used hours capacity."),
-                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Calculated Rule: 'Available Capacity' if Open Weekly Bandwidth is > 3 hrs/wk; 'Maxed Out / Overextended' if Open Weekly Bandwidth is < -2 hrs/wk; otherwise 'At Optimum Capacity'.")
+                "User": st.column_config.TextColumn("Employee Name"),
+                "Workload vs Revenue Return": st.column_config.TextColumn("Workload vs Revenue Return", help="Flags 'High Workload / Low Payout' if an employee has no free time left but brings in less than $15/hr in supported revenue. Otherwise Balanced Return."),
+                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs"),
+                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs"),
+                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f"),
+                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f"),
+                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
+                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target"),
+                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk"),
+                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk"),
+                "Supported_Revenue": st.column_config.NumberColumn("Supported Revenue", format="$%.2f"),
+                "Revenue_Supported_Per_Hour": st.column_config.NumberColumn("Revenue Supported / Hour", format="$%.2f/hr"),
+                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk"),
+                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Available Capacity if Open Bandwidth is over 3 hours/week. Maxed Out if under -2 hours/week. Otherwise Optimum Capacity.")
             })
             
             st.info("Hiring and Resource Allocation Guide: Employees are sorted by available capacity. Those at the top have the most open bandwidth available to accept new client assignments based on their target commitments and approved internal time.")
@@ -407,9 +401,7 @@ if is_admin:
                 leak_df = valid_leaks.sort_values(by='Gross Margin (%)', ascending=True).head(3)
                 if not leak_df.empty:
                     for _, r in leak_df.iterrows():
-                        st.warning(f"**{r['Client']}**: Running at a low **{r['Gross Margin (%)']:.1f}%** margin. Realized return is **${r['Effective Hourly Rate (EHR)']:.2f}/hr** on **{r['Hours_Spent']:.2f} hrs** of work.")
-                else:
-                    st.write("No active client accounts met the insight threshold parameters within this timeframe window.")
+                        st.warning(f"{r['Client']}: Running at a low {r['Gross Margin (%)']:.1f}% margin. Realized return is ${r['Effective Hourly Rate (EHR)']:.2f}/hr on {r['Hours_Spent']:.2f} hrs of work.")
                     
             with col_tk2:
                 st.markdown("#### Top 3 Employee Capacity and Overhead Focuses")
@@ -418,23 +410,21 @@ if is_admin:
                 low_value_performers = emp_summary[(emp_summary['Client_Hours'] > 5.0)].sort_values(by='Revenue_Supported_Per_Hour', ascending=True)
                 for _, r in low_value_performers.head(1).iterrows():
                     if r['Revenue_Supported_Per_Hour'] < 30.0:
-                        takeaways_emp.append(f"Employee **{r['User']}** is logging substantial time but yields a low Revenue Supported / Hour of **${r['Revenue_Supported_Per_Hour']:.2f}/hr** (Total: {r['Total_Hours_Logged']:.1f} hrs supporting **${r['Supported_Revenue']:.2f}** in weighted revenue).")
+                        takeaways_emp.append(f"Employee {r['User']} is logging substantial time but yields a low Revenue Supported / Hour of ${r['Revenue_Supported_Per_Hour']:.2f}/hr (Total: {r['Total_Hours_Logged']:.1f} hrs supporting ${r['Supported_Revenue']:.2f} in weighted revenue).")
                 
                 high_cap = emp_summary[emp_summary['Weekly_Hour_Target'].str.lower() != 'variable'].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
                 for _, r in high_cap.head(1).iterrows():
                     if r['Available_Weekly_Bandwidth'] > 2.0:
-                        takeaways_emp.append(f"Employee **{r['User']}** has **{r['Available_Weekly_Bandwidth']:.2f} open hrs/wk** available. Prime resource allocation candidate for new accounts.")
+                        takeaways_emp.append(f"Employee {r['User']} has {r['Available_Weekly_Bandwidth']:.2f} open hrs/wk available. Prime resource allocation candidate for new accounts.")
                 
                 high_int = emp_summary.sort_values(by='Avg_Internal_Hours_Per_Week', ascending=False)
                 for _, r in high_int.head(1).iterrows():
                     if r['Avg_Internal_Hours_Per_Week'] > (r['Allowed_Internal_Limit'] + 1.0):
                         excess = r['Avg_Internal_Hours_Per_Week'] - r['Allowed_Internal_Limit']
-                        takeaways_emp.append(f"Employee **{r['User']}** is logging heavy administrative time at **{r['Avg_Internal_Hours_Per_Week']:.2f} hrs/wk** (Exceeds baseline limit by **{excess:.2f} hrs/wk**).")
+                        takeaways_emp.append(f"Employee {r['User']} is logging heavy administrative time at {r['Avg_Internal_Hours_Per_Week']:.2f} hrs/wk (Exceeds baseline limit by {excess:.2f} hrs/wk).")
                 
                 for t in takeaways_emp[:3]:
                     st.write(t)
-        else:
-            st.info("No timeline logs available to generate employee summaries.")
 
         # --- DATA RECONCILIATION AUDIT ROOM ---
         st.markdown("---")
