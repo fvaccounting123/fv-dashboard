@@ -435,7 +435,7 @@ if is_admin:
         sheet_total_revenue = sum(smoothed_revenue_map.values())
         col_audit1, col_audit2 = st.columns(2)
         with col_audit1:
-            st.info(f"Total Revenue expected by Google Sheet calculations: ${sheet_total_revenue:,.2f}")
+            st.info(f"Total Revenue expected from internal calculations: ${sheet_total_revenue:,.2f}")
         with col_audit2:
             if abs(sheet_total_revenue - t_rev) < 0.01:
                 st.success("Perfect Match! Every single dollar is accounted for.")
