@@ -232,12 +232,12 @@ if is_admin:
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
             "Client": st.column_config.TextColumn("Client", help="The name of the client account from your records."),
             "Profitability Action": st.column_config.TextColumn("Profitability Action", help="Immediate Price Review if Gross Margin is under 40% and Logged Labor is 15+ hours. Minor Retainer Adjustment if workload is under 15 hours. Otherwise Healthy Margin."),
-            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs"),
-            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f"),
-            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f"),
-            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f"),
-            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%"),
-            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr")
+            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs", help="Total cumulative billable client hours logged against this account during the selected date window."),
+            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f", help="Sum of each employee's client hours multiplied by their respective monthly cost rate."),
+            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f", help="Total combined revenue collected from this account across all months in your selected date range."),
+            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f", help="Formula: Monthly Revenue minus Allocated Labor Cost."),
+            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%", help="Formula: (Project Net Profit / Monthly Revenue) * 100. Measures account return efficiency."),
+            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr", help="Formula: Monthly Revenue divided by Total Billable Hours Spent. Tells you exactly how much money the firm brings in for every single hour delivered to this client.")
         })
 
         st.markdown("### Visual Client Diagnostics")
@@ -325,8 +325,10 @@ if is_admin:
             delta_days = (focus_end - focus_start).days + 1
             total_weeks = max(0.1, delta_days / 7.0)
             
+            # --- CRITICAL FIX: FORCE NAME FORMATTING STRINGS TO CAPTITLE ---
             emp_summary['Clean_Key'] = emp_summary['User'].str.strip().str.lower().apply(lambda x: x.split('@')[0].split('.')[0])
             emp_summary['Hourly_Rate'] = emp_summary['Clean_Key'].map(rates_map).fillna(15.0)
+            emp_summary['Employee Name'] = emp_summary['Clean_Key'].str.title()
             
             emp_summary['Client_Labor_Cost'] = emp_summary['Client_Hours'] * emp_summary['Hourly_Rate']
             emp_summary['Internal_Labor_Cost'] = emp_summary['Internal_Hours'] * emp_summary['Hourly_Rate']
@@ -359,32 +361,21 @@ if is_admin:
             emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
             emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
             
-            # --- DECISION 2: TRUE FINANCIAL VELOCITY SWITCH ENGINE ---
-            def rule_revenue_drag_profile(row):
-                # Maxed out on time (<= 1 hr open/wk) but generating under $15/hr in supported billing velocity
-                if row['Available_Weekly_Bandwidth'] <= 1.0 and row['Revenue_Supported_Per_Hour'] < 15.0:
-                    if row['Weekly_Hour_Target'].lower() != 'variable':
-                        return "High Workload / Low Payout"
-                return "Balanced Return"
-                
-            emp_summary['Workload vs Revenue Return'] = emp_summary.apply(rule_revenue_drag_profile, axis=1)
-            
-            emp_disp = emp_summary[['User', 'Workload vs Revenue Return', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Supported_Revenue', 'Revenue_Supported_Per_Hour', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
+            emp_disp = emp_summary[['Employee Name', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Supported_Revenue', 'Revenue_Supported_Per_Hour', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
-                "User": st.column_config.TextColumn("Employee Name"),
-                "Workload vs Revenue Return": st.column_config.TextColumn("Workload vs Revenue Return", help="Flags 'High Workload / Low Payout' if an employee has no free time left but brings in less than $15/hr in supported revenue. Otherwise Balanced Return."),
-                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs"),
-                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs"),
-                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f"),
-                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f"),
-                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
-                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target"),
-                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk"),
-                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk"),
-                "Supported_Revenue": st.column_config.NumberColumn("Supported Revenue", format="$%.2f"),
-                "Revenue_Supported_Per_Hour": st.column_config.NumberColumn("Revenue Supported / Hour", format="$%.2f/hr"),
-                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk"),
+                "Employee Name": st.column_config.TextColumn("Employee Name", help="Employee identity mapped from your spreadsheet records."),
+                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Cumulative core client project assignment delivery hours logged."),
+                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Cumulative administrative operations overhead time units."),
+                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
+                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f", help="Formula: Non-billable Internal Overhead Hours multiplied by the employee's average historical rate for the period."),
+                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%", help="Formula: (Client Hours / Total Logged Hours) * 100. Measures direct delivery focus allocation."),
+                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target", help="Weekly hour target baseline pulled directly from your commitment parameters."),
+                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged client hours divided by the total number of calendar weeks."),
+                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged internal administrative hours divided by the total number of weeks."),
+                "Supported_Revenue": st.column_config.NumberColumn("Supported Revenue", format="$%.2f", help="The total revenue supported by this employee, calculated by weighting client revenue by the employee's share of hours spent on each client."),
+                "Revenue_Supported_Per_Hour": st.column_config.NumberColumn("Revenue Supported / Hour", format="$%.2f/hr", help="Formula: Supported Revenue divided by total logged hours. Measures the financial productivity density of the employee's logged time."),
+                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Formula: Weekly Hours Target minus used hours capacity."),
                 "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Available Capacity if Open Bandwidth is over 3 hours/week. Maxed Out if under -2 hours/week. Otherwise Optimum Capacity.")
             })
             
