@@ -325,9 +325,10 @@ if is_admin:
             delta_days = (focus_end - focus_start).days + 1
             total_weeks = max(0.1, delta_days / 7.0)
             
-            # --- CRITICAL FIX: FORCE NAME FORMATTING STRINGS TO CAPTITLE ---
             emp_summary['Clean_Key'] = emp_summary['User'].str.strip().str.lower().apply(lambda x: x.split('@')[0].split('.')[0])
             emp_summary['Hourly_Rate'] = emp_summary['Clean_Key'].map(rates_map).fillna(15.0)
+            
+            # --- FONT REPAIR FIX: Standardize user labels via a clean configuration column ---
             emp_summary['Employee Name'] = emp_summary['Clean_Key'].str.title()
             
             emp_summary['Client_Labor_Cost'] = emp_summary['Client_Hours'] * emp_summary['Hourly_Rate']
@@ -361,10 +362,21 @@ if is_admin:
             emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
             emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
             
-            emp_disp = emp_summary[['Employee Name', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Supported_Revenue', 'Revenue_Supported_Per_Hour', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
+            # --- TWO-OPTION WORKLOAD STATUS ENGINE ---
+            def rule_revenue_drag_profile(row):
+                if row['Available_Weekly_Bandwidth'] <= 1.0 and row['Revenue_Supported_Per_Hour'] < 15.0:
+                    if row['Weekly_Hour_Target'].lower() != 'variable':
+                        return "High Workload / Low Payout"
+                return "Balanced Return"
+                
+            emp_summary['Workload vs Revenue Return'] = emp_summary.apply(rule_revenue_drag_profile, axis=1)
+            
+            # --- CRITICAL RE-INJECTION FIX: Added custom metrics into ordered output array layout ---
+            emp_disp = emp_summary[['Employee Name', 'Workload vs Revenue Return', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Supported_Revenue', 'Revenue_Supported_Per_Hour', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
                 "Employee Name": st.column_config.TextColumn("Employee Name", help="Employee identity mapped from your spreadsheet records."),
+                "Workload vs Revenue Return": st.column_config.TextColumn("Workload vs Revenue Return", help="Flags 'High Workload / Low Payout' if an employee has no free time left but brings in less than $15/hr in supported revenue. Otherwise Balanced Return."),
                 "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Cumulative core client project assignment delivery hours logged."),
                 "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Cumulative administrative operations overhead time units."),
                 "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
