@@ -1,4 +1,4 @@
-import streamlit st
+import streamlit as st
 import pandas as pd
 import datetime
 import ssl
@@ -242,7 +242,6 @@ if is_admin:
         })
 
         st.markdown("### Visual Client Diagnostics")
-        # Scale charts to encompass all active qualifying accounts
         chart_df = df_master[(df_master['Hours_Spent'] > 0) & (df_master['Monthly_Revenue'] > 0)].sort_values(by='Monthly_Revenue', ascending=False)
         
         if not chart_df.empty:
@@ -251,7 +250,7 @@ if is_admin:
             st.plotly_chart(fig_compare, use_container_width=True)
             
             margin_df = chart_df.sort_values(by='Gross Margin (%)', ascending=True)
-            fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on Investment (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 22))
+            fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on ROI (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 22))
             st.plotly_chart(fig_margin, use_container_width=True)
         else:
             st.write("No active clients with both hours and revenue logged to generate visual diagnostics.")
