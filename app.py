@@ -11,19 +11,16 @@ st.set_page_config(page_title="FVA | Dashboard", layout="wide")
 # --- GLOBAL ENTERPRISE LIGHT MODE FORCE & BRANDING ENGINE ---
 st.markdown("""
 <style>
-    /* Force Light Background Globally for All Users */
     .stApp {
         background-color: #FFFFFF !important;
         color: #31333F !important;
     }
-    /* Main Page and Sidebar Component Base Color Resets */
     section[data-testid="stSidebar"] {
         background-color: #F8F9FA !important;
     }
     html, body, .stMarkdown, p, span, label, h1, h2, h3, h4, h5, h6 {
         color: #31333F !important;
     }
-    /* Brand Accent Background Fills using Custom Forest Green */
     .stMetric {
         background-color: #F8F9FA !important;
         padding: 20px !important;
@@ -33,19 +30,16 @@ st.markdown("""
         border-right: 1px solid #E6E8EA !important;
         border-bottom: 1px solid #E6E8EA !important;
     }
-    /* Forest Green Highlights for Metrics */
     div[data-testid="stMetricValue"] div {
         color: #3D5234 !important;
         font-weight: 700 !important;
     }
-    /* Muted Labels */
     div[data-testid="stMetricLabel"] p {
         color: #5A626A !important;
         font-size: 14px !important;
         letter-spacing: 0.5px !important;
         text-transform: uppercase !important;
     }
-    /* Fix Input Field Labels to stay visible dark gray */
     label[data-testid="stWidgetLabel"] p {
         color: #31333F !important;
     }
@@ -367,15 +361,16 @@ if is_admin:
             emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
             emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
             
-            # --- DECISIONS 2 & 3: STRATEGIC ROUTING PROFILE ---
+            # --- DECISIONS 2 & 3: STRATEGIC ROUTING PROFILE (RELAXED & REWORDED CRITERIA) ---
             def rule_assignment_profile(row):
                 if row['Available_Weekly_Bandwidth'] > 3.0:
                     if row['Revenue_Supported_Per_Hour'] >= 35.0:
                         return "Top Growth Choice"
                     return "Available for Assignment"
-                if row['Available_Weekly_Bandwidth'] <= 1.0 and row['Revenue_Supported_Per_Hour'] < 25.0:
+                # Relaxed threshold line from $25 down to $15 to isolate only extreme bottlenecks
+                if row['Available_Weekly_Bandwidth'] <= 1.0 and row['Revenue_Supported_Per_Hour'] < 15.0:
                     if row['Weekly_Hour_Target'].lower() != 'variable':
-                        return "Portfolio Strained / Audit"
+                        return "High Workload / Low Yield"
                 return "At Operational Capacity"
                 
             emp_summary['Assignment Profile'] = emp_summary.apply(rule_assignment_profile, axis=1)
@@ -384,7 +379,7 @@ if is_admin:
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
                 "User": st.column_config.TextColumn("Employee Name", help="Employee identity mapped from your logs."),
-                "Assignment Profile": st.column_config.TextColumn("Assignment Profile", help="Calculated Rule: 'Top Growth Choice' if Open Bandwidth is > 3 hrs/wk AND Revenue Supported/Hr is >= $35/hr. 'Portfolio Strained / Audit' if Open Bandwidth is <= 1 hr/wk AND Revenue Supported/Hr is < $25/hr. Otherwise 'At Operational Capacity'."),
+                "Assignment Profile": st.column_config.TextColumn("Assignment Profile", help="Calculated Rule: 'Top Growth Choice' if Open Bandwidth is > 3 hrs/wk AND Revenue Supported/Hr is >= $35/hr. 'High Workload / Low Yield' if Open Bandwidth is <= 1 hr/wk AND Revenue Supported/Hr is < $15/hr. Otherwise 'At Operational Capacity'."),
                 "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Cumulative core client project assignment delivery hours logged."),
                 "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Cumulative administrative operations overhead time units."),
                 "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
