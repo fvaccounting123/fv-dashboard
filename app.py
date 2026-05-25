@@ -11,7 +11,7 @@ st.set_page_config(page_title="FVA | Dashboard", layout="wide")
 # --- CUSTOM CORPORATE BRANDING ENGINE ---
 st.markdown("""
 <style>
-    /* Global Typography Reset to Editorial Sans-Serif */
+    /* Global Typography Reset to Clean Corporate Sans-Serif */
     html, body, [class*="css"], .stMarkdown, p, span, label {
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
     }
@@ -40,7 +40,7 @@ st.markdown("""
 if os.path.exists("logo.png"):
     st.sidebar.image("logo.png", use_container_width=True)
 
-st.title("First Valley Accounting | Corporate Performance Analytics")
+st.title("First Valley Accounting | Dashboard")
 
 # --- SIDEBAR ACCESS CONTROL ---
 st.sidebar.header("Access Control")
@@ -68,13 +68,16 @@ except Exception as e:
     st.error(f"Data Link Execution Fault: {e}")
     st.stop()
 
+# Standardize column labels immediately
 revenue_sheet.columns = revenue_sheet.columns.str.strip()
 rates_sheet.columns = rates_sheet.columns.str.strip()
 master_clockify.columns = master_clockify.columns.str.strip()
 
+# Format and parse Clockify dates automatically from the sheet tab
 master_clockify['Parsed Date'] = pd.to_datetime(master_clockify['Start Date'], errors='coerce')
 master_clockify = master_clockify.dropna(subset=['Parsed Date'])
 
+# --- AUTOMATED PREVIOUS MONTH CALCULATION ---
 today = datetime.date.today()
 first_this_month = today.replace(day=1)
 last_prev_month = first_this_month - datetime.timedelta(days=1)
@@ -83,9 +86,9 @@ first_prev_month = last_prev_month.replace(day=1)
 min_log_date = master_clockify['Parsed Date'].min().date()
 max_log_date = master_clockify['Parsed Date'].max().date()
 
-st.markdown("### Temporal Parameters")
+st.markdown("### Filter Dashboard Scope")
 selected_range = st.date_input(
-    "Analyze operational data across this window:",
+    "Select custom date window to analyze:",
     value=(first_prev_month, last_prev_month), 
     min_value=min_log_date,
     max_value=max_log_date
@@ -111,6 +114,8 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             curr = curr.replace(month=curr.month + 1)
             
     client_col_name = next((c for c in revenue_sheet.columns if 'client' in c.lower()), revenue_sheet.columns[1])
+    
+    # Failsafe Index Mappers for column structures
     commit_col_name = next((c for c in rates_sheet.columns if 'commit' in c.lower() or 'comit' in c.lower() or 'target' in c.lower()), rates_sheet.columns[1])
     internal_limit_col = next((c for c in rates_sheet.columns if 'allowed' in c.lower() or 'limit' in c.lower() or 'internal' in c.lower()), rates_sheet.columns[2])
     
@@ -127,6 +132,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
     internal_mask = month_clockify['Client'].str.strip().str.lower() == 'internal'
     client_df = month_clockify[~internal_mask]
     
+    # Process base cost mappings from monthly cost columns
     rates_map = {}
     matching_rate_cols = [rates_date_map.get(m) for m in active_months if rates_date_map.get(m)]
     if matching_rate_cols:
@@ -186,7 +192,7 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
     df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
     
     if is_admin:
-        st.markdown("### Client Account Financial Ledger")
+        st.markdown("### Client Profitability Leaderboard")
         t_rev = df_master['Monthly_Revenue'].sum()
         t_cost = df_master['Labor_Cost'].sum()
         f_prof = t_rev - t_cost
@@ -198,45 +204,50 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
         c3.metric("Project Gross Margin", f"{f_marg:.1f}%")
         c4.metric("Total Billable Hours Logged", f"{df_master['Hours_Spent'].sum():,.1f} hrs")
         
+        # TABLE 1: CLIENT FINANCIAL GRID MOVED DIRECTLY ABOVE CHARTS
         df_disp = df_master.drop(columns=['match_key']).sort_values(by='Gross Margin (%)', ascending=False)
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
-            "Client": st.column_config.TextColumn("Client", help="Registered identity of the client account."),
-            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs", help="Total cumulative client fulfillment hours recorded over this window."),
-            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f", help="Fulfillment hours scaled by historical wage allocations."),
-            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f", help="Total recognized firm billing fees generated over the timeline parameters."),
-            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f", help="Gross revenue generation minus corresponding delivery cost footprints."),
-            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%", help="Proportional delivery return performance of the engagement portfolio."),
-            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr", help="The absolute hourly return yield achieved for every unit of production delivered.")
+            "Client": st.column_config.TextColumn("Client", help="The name of the client account from your records."),
+            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs", help="Total cumulative billable client hours logged against this account during the selected date window."),
+            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f", help="Sum of each employee's client hours multiplied by their respective monthly cost rate from your spreadsheet tab."),
+            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f", help="Total combined revenue collected from this account across all months in your selected date range."),
+            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f", help="Formula: Monthly Revenue minus Allocated Labor Cost."),
+            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%", help="Formula: (Project Net Profit / Monthly Revenue) * 100. Measures account return efficiency."),
+            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr", help="Formula: Monthly Revenue divided by Total Billable Hours Spent. Tells you exactly how much money the firm brings in for every single hour delivered to this client.")
         })
 
-        st.markdown("### Portfolio Performance Matrix")
+        st.markdown("### Visual Client Diagnostics")
         chart_df = df_master.sort_values(by='Monthly_Revenue', ascending=False).head(15)
-        fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Fee Yield vs Production Delivery Cost Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#3D5234', '#E74C3C'])
+        fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Allocated Labor Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#3D5234', '#E74C3C'])
         fig_compare.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig_compare, use_container_width=True)
         
-        # --- REVENUE CONTRIBUTION MATRICES ENGINE ---
+        margin_df = df_master[df_master['Monthly_Revenue'] > 0].sort_values(by='Gross Margin (%)', ascending=True)
+        fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on Investment (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 20))
+        st.plotly_chart(fig_margin, use_container_width=True)
+        
+        # --- SAFE AND ROBUST REVENUE WEIGHT MATCHING ENGINE ---
+        user_rev_aggregates = {}
         if not client_df.empty:
             raw_client_totals = client_df.groupby('Client')['Duration (decimal)'].sum().to_dict()
+            client_user_groups = client_df.groupby(['Client', 'User'])['Duration (decimal)'].sum().reset_index()
             
-            def calculate_user_revenue_weight(row):
-                c_lbl = row['Client']
-                tot_c_hours = raw_client_totals.get(c_lbl, 0.0)
-                if tot_c_hours == 0: return 0.0
-                c_key_clean = str(c_lbl).strip().lower()
-                c_rev_lookup = smoothed_revenue_map.get(c_key_clean, 0.0)
-                user_share = row['Duration (decimal)'] / tot_c_hours
-                return user_share * c_rev_lookup
+            for idx, r_row in client_user_groups.iterrows():
+                c_lbl = r_row['Client']
+                u_lbl = r_row['User']
+                u_hrs = float(r_row['Duration (decimal)'])
+                tot_c_hours = float(raw_client_totals.get(c_lbl, 0.0))
                 
-            client_df_cp = client_df.copy()
-            client_df_cp['Weighted_Revenue_Credit'] = client_df_cp.apply(calculate_user_revenue_weight, axis=1)
-            user_rev_aggregates = client_df_cp.groupby('User')['Weighted_Revenue_Credit'].sum().to_dict()
-        else:
-            user_rev_aggregates = {}
+                if tot_c_hours > 0:
+                    c_key_clean = str(c_lbl).strip().lower()
+                    c_rev_lookup = smoothed_revenue_map.get(c_key_clean, 0.0)
+                    user_share = u_hrs / tot_c_hours
+                    weighted_credit = user_share * c_rev_lookup
+                    user_rev_aggregates[u_lbl] = user_rev_aggregates.get(u_lbl, 0.0) + weighted_credit
 
         # --- EMPLOYEE CAPACITY & UTILIZATION TRACKER WORKSPACE ---
         st.markdown("---")
-        st.markdown("### Human Capital Capacity & Revenue Support Matrix")
+        st.markdown("### Team Staff Capacity & Available Bandwidth Tracker")
         
         if not month_clockify.empty:
             m_clock_cp = month_clockify.copy()
@@ -302,8 +313,9 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             emp_summary['Avg_Internal_Hours_Per_Week'] = emp_summary['Internal_Hours'] / total_weeks
             emp_summary['Target_Numeric'] = pd.to_numeric(emp_summary['Weekly_Hour_Target'], errors='coerce').fillna(0.0)
             
-            emp_summary['Supported_Revenue_Credit'] = emp_summary['User'].map(user_rev_aggregates).fillna(0.0)
-            emp_summary['Realized_Revenue_Value_Rate'] = (emp_summary['Supported_Revenue_Credit'] / emp_summary['Total_Hours_Logged']).fillna(0.0)
+            # Mount New Verified Revenue Supported Tracking Metrics
+            emp_summary['Supported_Revenue'] = emp_summary['User'].map(user_rev_aggregates).fillna(0.0)
+            emp_summary['Revenue_Supported_Per_Hour'] = (emp_summary['Supported_Revenue'] / emp_summary['Total_Hours_Logged']).fillna(0.0)
             
             def calculate_firm_bandwidth(row):
                 if row['Weekly_Hour_Target'].lower() == 'variable': return 0.0
@@ -323,21 +335,27 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
             emp_summary['Available_Weekly_Bandwidth'] = emp_summary.apply(calculate_firm_bandwidth, axis=1)
             emp_summary['Capacity_Status'] = emp_summary.apply(set_firm_capacity_status, axis=1)
             
-            emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Available_Weekly_Bandwidth', 'Supported_Revenue_Credit', 'Realized_Revenue_Value_Rate', 'Capacity_Status']].sort_values(by='Realized_Revenue_Value_Rate', ascending=False)
+            # TABLE 2: REVERTED TO HIGHEST CAPACITY AVAILABLE SORT ORDER
+            emp_disp = emp_summary[['User', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Supported_Revenue', 'Revenue_Supported_Per_Hour', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
-                "User": st.column_config.TextColumn("Resource Name", help="Employee identity mapped from tracked workspace files."),
+                "User": st.column_config.TextColumn("Employee Name", help="Employee identity mapped from your logs."),
                 "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Cumulative core client project assignment delivery hours logged."),
                 "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Cumulative administrative operations and training overhead time units."),
-                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%", help="Fulfillment hours scaled against total logged timeline activity footprint."),
-                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target", help="Contractual baseline threshold allocation parameters."),
-                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Remaining open hours available for direct onboarding before target milestones are met."),
-                "Supported_Revenue_Credit": st.column_config.NumberColumn("Supported Revenue Credit", format="$%.2f", help="Portfolio revenue weight attributed to this resource proportional to their logged labor share across accounts."),
-                "Realized_Revenue_Value_Rate": st.column_config.NumberColumn("Realized Revenue Value Rate", format="$%.2f/hr", help="The absolute value density rate generated by this professional. Formula: Supported Revenue Credit divided by total logged hours."),
-                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation")
+                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
+                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f", help="Formula: Non-billable Internal Overhead Hours multiplied by the employee's average historical rate for the period."),
+                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%", help="Formula: (Client Hours / Total Logged Hours) * 100. Measures direct delivery focus allocation."),
+                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target", help="Weekly hour target baseline pulled directly from your commitment parameters."),
+                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged client hours divided by the total number of calendar weeks in your selected date range filter."),
+                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged internal administrative hours divided by the total number of calendar weeks in your filter range."),
+                "Supported_Revenue": st.column_config.NumberColumn("Supported Revenue", format="$%.2f", help="The total revenue supported by this employee, calculated by weighting client revenue by the employee's share of hours spent on each client."),
+                "Revenue_Supported_Per_Hour": st.column_config.NumberColumn("Revenue Supported / Hour", format="$%.2f/hr", help="Formula: Supported Revenue divided by total logged hours. Measures the financial productivity density of the employee's logged time."),
+                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Formula: Weekly Hours Target minus (Avg Client Hours/Wk + the lesser of your Allowed Internal Limit or Avg Internal Hours/Wk). Tells you exactly how many hours this person has available for new clients."),
+                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Status interpretation of Open Bandwidth. Greater than 3 open hours = Available Capacity; Between -2 and 3 hours = At Optimum Capacity; Under -2 hours = Maxed Out / Overextended.")
             })
             
-            st.info("Hiring and Resource Allocation Guide: Resources are ranked by their Realized Revenue Value Rate. High value rates isolate high-efficiency performers across valuable retainers; low value rates pinpoint margin leaks where substantial delivery hours are assigned to accounts generating minimal relative fee income.")
+            # Clean text-only note replacing spreadsheet reference jargon
+            st.info("Hiring and Resource Allocation Guide: Employees are sorted by available capacity. Those at the top have the most open bandwidth available to accept new client assignments based on their target commitments and approved internal time.")
             
             # --- STRATEGIC INSIGHTS TAKEAWAYS BLOCK ---
             st.markdown("---")
@@ -358,21 +376,21 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
                 st.markdown("#### Top 3 Employee Capacity and Overhead Focuses")
                 takeaways_emp = []
                 
-                low_value_performers = emp_summary[(emp_summary['Client_Hours'] > 5.0)].sort_values(by='Realized_Revenue_Value_Rate', ascending=True)
+                low_value_performers = emp_summary[(emp_summary['Client_Hours'] > 5.0)].sort_values(by='Revenue_Supported_Per_Hour', ascending=True)
                 for _, r in low_value_performers.head(1).iterrows():
-                    if r['Realized_Revenue_Value_Rate'] < 30.0:
-                        takeaways_emp.append(f"Resource **{r['User']}** is logging substantial time but yields a low Realized Revenue Value Rate of **${r['Realized_Revenue_Value_Rate']:.2f}/hr** (Total: {r['Total_Hours_Logged']:.1f} hrs supporting **${r['Supported_Revenue_Credit']:.2f}** in weighted revenue).")
+                    if r['Revenue_Supported_Per_Hour'] < 30.0:
+                        takeaways_emp.append(f"Employee **{r['User']}** is logging substantial time but yields a low Revenue Supported / Hour of **${r['Revenue_Supported_Per_Hour']:.2f}/hr** (Total: {r['Total_Hours_Logged']:.1f} hrs supporting **${r['Supported_Revenue']:.2f}** in weighted revenue).")
                 
                 high_cap = emp_summary[emp_summary['Weekly_Hour_Target'].str.lower() != 'variable'].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
                 for _, r in high_cap.head(1).iterrows():
                     if r['Available_Weekly_Bandwidth'] > 2.0:
-                        takeaways_emp.append(f"Resource **{r['User']}** has **{r['Available_Weekly_Bandwidth']:.2f} open hrs/wk** available. Prime resource allocation candidate for new accounts.")
+                        takeaways_emp.append(f"Employee **{r['User']}** has **{r['Available_Weekly_Bandwidth']:.2f} open hrs/wk** available. Prime resource allocation candidate for new accounts.")
                 
                 high_int = emp_summary.sort_values(by='Avg_Internal_Hours_Per_Week', ascending=False)
                 for _, r in high_int.head(1).iterrows():
                     if r['Avg_Internal_Hours_Per_Week'] > (r['Allowed_Internal_Limit'] + 1.0):
                         excess = r['Avg_Internal_Hours_Per_Week'] - r['Allowed_Internal_Limit']
-                        takeaways_emp.append(f"Resource **{r['User']}** is logging heavy administrative time at **{r['Avg_Internal_Hours_Per_Week']:.2f} hrs/wk** (Exceeds baseline limit by **{excess:.2f} hrs/wk**).")
+                        takeaways_emp.append(f"Employee **{r['User']}** is logging heavy administrative time at **{r['Avg_Internal_Hours_Per_Week']:.2f} hrs/wk** (Exceeds baseline limit by **{excess:.2f} hrs/wk**).")
                 
                 for t in takeaways_emp[:3]:
                     st.write(t)
