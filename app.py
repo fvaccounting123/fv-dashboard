@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit st
 import pandas as pd
 import datetime
 import ssl
@@ -197,6 +197,9 @@ if is_admin:
         df_master['Gross Margin (%)'] = (df_master['Net Profit ($)'] / df_master['Monthly_Revenue'] * 100).fillna(0)
         df_master['Effective Hourly Rate (EHR)'] = (df_master['Monthly_Revenue'] / df_master['Hours_Spent']).fillna(0)
         
+        # --- DYNAMIC STAGE FILTERING: Drop completely inactive clients for the selected range window ---
+        df_master = df_master[(df_master['Hours_Spent'] > 0) | (df_master['Monthly_Revenue'] > 0)].reset_index(drop=True)
+        
         # --- DECISION 1: CLIENT PROFITABILITY TRIAGE ---
         def rule_client_triage(row):
             if row['Monthly_Revenue'] == 0 or row['Hours_Spent'] == 0:
@@ -228,26 +231,27 @@ if is_admin:
         df_disp = df_disp[ordered_cols]
         
         st.dataframe(df_disp, use_container_width=True, hide_index=True, column_config={
-            "Client": st.column_config.TextColumn("Client"),
-            "Profitability Action": st.column_config.TextColumn("Profitability Action"),
-            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs"),
-            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f"),
-            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f"),
-            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f"),
-            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%"),
-            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr")
+            "Client": st.column_config.TextColumn("Client", help="The name of the client account from your records."),
+            "Profitability Action": st.column_config.TextColumn("Profitability Action", help="Automatic action designation based on current margin health and logged labor load."),
+            "Hours_Spent": st.column_config.NumberColumn("Billable Hours Spent", format="%.2f hrs", help="Total cumulative billable client hours logged against this account during the selected date window."),
+            "Labor_Cost": st.column_config.NumberColumn("Allocated Labor Cost", format="$%.2f", help="Sum of each employee's client hours multiplied by their respective monthly cost rate."),
+            "Monthly_Revenue": st.column_config.NumberColumn("Monthly Revenue", format="$%.2f", help="Total combined revenue collected from this account across all months in your selected date range."),
+            "Net Profit ($)": st.column_config.NumberColumn("Project Net Profit ($)", format="$%.2f", help="Formula: Monthly Revenue minus Allocated Labor Cost."),
+            "Gross Margin (%)": st.column_config.NumberColumn("Project Gross Margin", format="%.1f%%", help="Formula: (Project Net Profit / Monthly Revenue) * 100. Measures account return efficiency."),
+            "Effective Hourly Rate (EHR)": st.column_config.NumberColumn("Realized Client Hourly Return", format="$%.2f/hr", help="Formula: Monthly Revenue divided by Total Billable Hours Spent. Tells you exactly how much money the firm brings in for every single hour delivered to this client.")
         })
 
         st.markdown("### Visual Client Diagnostics")
-        chart_df = df_master[(df_master['Hours_Spent'] > 0) & (df_master['Monthly_Revenue'] > 0)].sort_values(by='Monthly_Revenue', ascending=False).head(15)
+        # Scale charts to encompass all active qualifying accounts
+        chart_df = df_master[(df_master['Hours_Spent'] > 0) & (df_master['Monthly_Revenue'] > 0)].sort_values(by='Monthly_Revenue', ascending=False)
         
         if not chart_df.empty:
-            fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Revenue vs Allocated Labor Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#3D5234', '#E74C3C'])
+            fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Active Clients: Revenue vs Allocated Labor Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#3D5234', '#E74C3C'])
             fig_compare.update_layout(xaxis_tickangle=-45)
             st.plotly_chart(fig_compare, use_container_width=True)
             
             margin_df = chart_df.sort_values(by='Gross Margin (%)', ascending=True)
-            fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on Investment (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 20))
+            fig_margin = px.bar(margin_df, x='Gross Margin (%)', y='Client', orientation='h', title='Client Return on Investment (Gross Margin %)', color='Gross Margin (%)', color_continuous_scale='RdYlGn', labels={'Gross Margin (%)': 'Profit Margin %'}, height=max(400, len(margin_df) * 22))
             st.plotly_chart(fig_margin, use_container_width=True)
         else:
             st.write("No active clients with both hours and revenue logged to generate visual diagnostics.")
@@ -375,20 +379,20 @@ if is_admin:
             emp_disp = emp_summary[['User', 'Assignment Profile', 'Client_Hours', 'Internal_Hours', 'Client_Labor_Cost', 'Internal_Labor_Cost', 'True_Utilization_Rate', 'Weekly_Hour_Target', 'Avg_Client_Hours_Per_Week', 'Avg_Internal_Hours_Per_Week', 'Supported_Revenue', 'Revenue_Supported_Per_Hour', 'Available_Weekly_Bandwidth', 'Capacity_Status']].sort_values(by='Available_Weekly_Bandwidth', ascending=False)
             
             st.dataframe(emp_disp, use_container_width=True, hide_index=True, column_config={
-                "User": st.column_config.TextColumn("Employee Name"),
-                "Assignment Profile": st.column_config.TextColumn("Assignment Profile"),
-                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs"),
-                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs"),
-                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f"),
-                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f"),
-                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%"),
-                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target"),
-                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk"),
-                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk"),
-                "Supported_Revenue": st.column_config.NumberColumn("Supported Revenue", format="$%.2f"),
-                "Revenue_Supported_Per_Hour": st.column_config.NumberColumn("Revenue Supported / Hour", format="$%.2f/hr"),
-                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk"),
-                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation")
+                "User": st.column_config.TextColumn("Employee Name", help="Employee identity mapped from your logs."),
+                "Assignment Profile": st.column_config.TextColumn("Assignment Profile", help="Strategic context combining open bandwidth metrics with financial support output density."),
+                "Client_Hours": st.column_config.NumberColumn("Client Hours", format="%.2f hrs", help="Cumulative core client project assignment delivery hours logged."),
+                "Internal_Hours": st.column_config.NumberColumn("Internal Overhead", format="%.2f hrs", help="Cumulative administrative operations overhead time units."),
+                "Client_Labor_Cost": st.column_config.NumberColumn("Client Labor Cost", format="$%.2f", help="Formula: Billable Client Hours multiplied by the employee's average historical rate for the period."),
+                "Internal_Labor_Cost": st.column_config.NumberColumn("Internal Labor Cost", format="$%.2f", help="Formula: Non-billable Internal Overhead Hours multiplied by the employee's average historical rate for the period."),
+                "True_Utilization_Rate": st.column_config.NumberColumn("True Utilization Rate", format="%.1f%%", help="Formula: (Client Hours / Total Logged Hours) * 100. Measures direct delivery focus allocation."),
+                "Weekly_Hour_Target": st.column_config.TextColumn("Weekly Hours Target", help="Weekly hour target baseline pulled directly from your commitment parameters."),
+                "Avg_Client_Hours_Per_Week": st.column_config.NumberColumn("Avg Billable Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged client hours divided by the total number of calendar weeks."),
+                "Avg_Internal_Hours_Per_Week": st.column_config.NumberColumn("Avg Internal Hours/Wk", format="%.2f hrs/wk", help="Formula: Total logged internal administrative hours divided by the total number of weeks."),
+                "Supported_Revenue": st.column_config.NumberColumn("Supported Revenue", format="$%.2f", help="The total revenue supported by this employee, calculated by weighting client revenue by the employee's share of hours spent on each client."),
+                "Revenue_Supported_Per_Hour": st.column_config.NumberColumn("Revenue Supported / Hour", format="$%.2f/hr", help="Formula: Supported Revenue divided by total logged hours. Measures the financial productivity density of the employee's logged time."),
+                "Available_Weekly_Bandwidth": st.column_config.NumberColumn("Open Weekly Bandwidth", format="%.2f open hrs/wk", help="Formula: Weekly Hours Target minus used hours capacity."),
+                "Capacity_Status": st.column_config.TextColumn("Hiring Status Allocation", help="Status interpretation of Open Bandwidth.")
             })
             
             st.info("Hiring and Resource Allocation Guide: Employees are sorted by available capacity. Those at the top have the most open bandwidth available to accept new client assignments based on their target commitments and approved internal time.")
