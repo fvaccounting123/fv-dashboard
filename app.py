@@ -438,7 +438,7 @@ if is_admin:
             st.info(f"Total Revenue expected by Google Sheet calculations: ${sheet_total_revenue:,.2f}")
         with col_audit2:
             if abs(sheet_total_revenue - t_rev) < 0.01:
-                st.success("Perfect Match! Every single dollar inside your Google Sheet is accounted for.")
+                st.success("Perfect Match! Every single dollar is accounted for.")
             else:
                 st.warning(f"Discrepancy Amount: ${sheet_total_revenue - t_rev:,.2f} is unmatched.")
 else:
