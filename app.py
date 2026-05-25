@@ -211,7 +211,6 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
 
         st.markdown("### Portfolio Performance Matrix")
         chart_df = df_master.sort_values(by='Monthly_Revenue', ascending=False).head(15)
-        # Calibrated bar chart to use your #3D5234 Forest Green Palette
         fig_compare = px.bar(chart_df, x='Client', y=['Monthly_Revenue', 'Labor_Cost'], barmode='group', title='Top 15 Clients: Fee Yield vs Production Delivery Cost Drag', labels={'value': 'Amount ($)', 'variable': 'Financial Metric'}, color_discrete_sequence=['#3D5234', '#E74C3C'])
         fig_compare.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig_compare, use_container_width=True)
@@ -392,6 +391,3 @@ if isinstance(selected_range, tuple) and len(selected_range) == 2:
                 st.success("Perfect Match! Every single dollar inside your Google Sheet is accounted for.")
             else:
                 st.warning(f"Discrepancy Amount: ${sheet_total_revenue - t_rev:,.2f} is unmatched.")
-        
-except Exception as main_err:
-    st.error(f"System Matrix Execution Fault: {main_err}")
